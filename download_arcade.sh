@@ -11,4 +11,6 @@ pip install seqio nbconvert diff-match-patch dacite
 
 cd ..
 PYTHONPATH=../../ python build_existing_tasks_split.py
+
+# cd arcade-nl2code/arcade_nl2code/annotated_dataset
 PYTHONPATH=../../ python build_new_tasks_split.py

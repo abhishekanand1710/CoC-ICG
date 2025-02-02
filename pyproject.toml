@@ -6,13 +6,26 @@ authors = [
     {name = "Abhishek Anand",email = "abhi1aa@outlook.com"}
 ]
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<4"
 dependencies = [
     "pandas",
     "datasets",
     "openai",
     "gitpython (>=3.1.44,<4.0.0)",
     "kaggle (>=1.6.17,<2.0.0)",
+    "absl-py (>=2.1.0,<3.0.0)",
+    "ipython-genutils (>=0.2.0,<0.3.0)",
+    "nbformat (>=5.10.4,<6.0.0)",
+    "cmake (>=3.31.4,<4.0.0)",
+    "tensorflow-text (>=2.18.1,<3.0.0)",
+    "seqio (>=0.0.19,<0.0.20)",
+    "dacite (>=1.9.1,<2.0.0)",
+    "pillow (>=11.1.0,<12.0.0)",
+    "cloudpickle (>=3.1.1,<4.0.0)",
+    "astor (>=0.8.1,<0.9.0)",
+    "bs4 (>=0.0.2,<0.0.3)",
+    "nbconvert (>=7.16.6,<8.0.0)",
+    "faketime @ git+ssh://git@github.com/hitchdev/faketime.git",
 ]
 
 

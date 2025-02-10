@@ -75,7 +75,6 @@ def prepare_one_instance(instance):
 def process_instances(instances):
     for instance_id, instance in instances.items():
         prepare_one_instance(instance)
-        break
 
 def main():
     os.makedirs('./swe_bench_cache', exist_ok=True)

@@ -74,8 +74,6 @@ def generate_patch(state: GraphState):
         f"{sys_prompt}\n{problem_staement_prompt}\n{unified_diff_prompt}"
     )
     
-    with open('prompt.txt', 'w') as f:
-        f.write(state["context"])
     chain = prompt | llm
     
     response = chain.invoke({
@@ -150,6 +148,8 @@ def main(args):
                 "model_name_or_path": args.model
             }
             preds.append(output)
+            if len(preds) == 50:
+                break
     except Exception as e:
         print(e)
 

@@ -3,6 +3,7 @@ from typing import TypedDict, List, Optional
 import json
 from tqdm import tqdm
 import argparse
+import traceback
 
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
@@ -13,10 +14,13 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langchain_text_splitters import Language
+import langchain
 
 from utils.git_utils import checkout_git_repo_at_commit
-from utils.response_utils import extract_diff_from_markdown
+from utils.response_utils import extract_patch_from_markdown
 from prompts import *
+
+langchain.verbose = True
 
 llm = None
 
@@ -61,17 +65,20 @@ def create_retriever(instance_id, splits):
         vectorstore = FAISS.from_documents(splits, embeddings)
         vectorstore.save_local(embeddings_path)
 
-    return vectorstore.as_retriever(k=20)
+    return vectorstore.as_retriever(k=50)
 
 def retrieve_documents(state: GraphState):
     retriever = create_retriever(state["instance_id"], state["documents"])
     relevant_docs = retriever.invoke(state["problem"])
-    context = "\n\n".join([d.page_content for d in relevant_docs])
+
+    context = "\n".join([relevant_code_snippet_prompt.format(filepath = d.metadata['source'], code = d.page_content) for d in relevant_docs])
     return {"context": context}
 
 def generate_patch(state: GraphState):
+
+    inference_prompt = f"{problem_statement_prompt}\n{diff_patch_example}\n{final_inference_prompt}"
     prompt = ChatPromptTemplate.from_template(
-        f"{sys_prompt}\n{problem_staement_prompt}\n{unified_diff_prompt}"
+        inference_prompt
     )
     
     chain = prompt | llm
@@ -82,7 +89,6 @@ def generate_patch(state: GraphState):
     })
     
     return {"patch": response.content}
-
 
 def build_workflow():
     workflow = StateGraph(GraphState)
@@ -109,7 +115,7 @@ def run_inference(instance, base_repo_dir):
 
     app = build_workflow()
     result = app.invoke(initial_state)
-    patch = extract_diff_from_markdown(result["patch"])
+    patch = extract_patch_from_markdown(result["patch"])
 
     return patch
 
@@ -132,7 +138,11 @@ def load_local_dataset(input_file, processed_instances):
     return dataset
 
 def main(args):
-    output_file = f"output/prediction_vanilla_rag_{args.model}.json"
+    run_id = args.run_id
+    if not os.path.exists(f"output/{run_id}"):
+        os.mkdir(f"output/{run_id}")
+
+    output_file = f"output/{run_id}/prediction_vanilla_rag_{args.model}.json"
     processed_instances = load_processed_instances(output_file)
 
     dataset = load_local_dataset(args.input_file, processed_instances)
@@ -141,7 +151,7 @@ def main(args):
     preds = [value for _, value in processed_instances.items()]
     try:
         for key, test_instance in tqdm(dataset.items()):
-            patch = run_inference(test_instance, args.repo_dir)
+            patch = run_inference(test_instance, args.dir)
             output = {
                 "instance_id": key,
                 "model_patch": patch,
@@ -151,8 +161,8 @@ def main(args):
             if len(preds) == 50:
                 break
     except Exception as e:
-        print(e)
-
+        traceback.print_exc()
+        
     with open(output_file, "w") as f:
         json.dump(preds, f)
     
@@ -162,7 +172,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SWE Agent using RAG")
     parser.add_argument("-m", "--model", type=str, help="Model to use", default="gpt-4o-mini")
     parser.add_argument("-i", "--input_file", type=str, help="Dataset file for SWE-Bench", default="swe_bench_cache/dataset.json")
-    parser.add_argument("-r", "--repo_dir", type=str, help="Directory containing SWE-Bench task repos", default="swe_bench_cache/repos")
+    parser.add_argument("-d", "--dir", type=str, help="Directory containing SWE-Bench task repos", default="swe_bench_cache/repos")
+    parser.add_argument("-r", "--run_id", type=str, help="Id for current run", required=True)
 
     args = parser.parse_args()
 

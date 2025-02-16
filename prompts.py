@@ -5,17 +5,95 @@ thorough and handles all cases in order to be bug free. You can fix bugs given p
 statements by identifying the right changes to make in relevant code files.
 """
 
-problem_staement_prompt = """
-The following is the problem statement of an existing issue that is part of a repository
+diff_patch_example = """<patch>
+--- a/file.py
++++ b/file.py
+@@ -1,27 +1,35 @@
+ def euclidean(a, b):
+-    while b:
+-        a, b = b, a % b
+-    return a
++    if b == 0:
++        return a
++    return euclidean(b, a % b)
+ 
+ 
+ def bresenham(x0, y0, x1, y1):
+     points = []
+     dx = abs(x1 - x0)
+     dy = abs(y1 - y0)
+-    sx = 1 if x0 < x1 else -1
+-    sy = 1 if y0 < y1 else -1
+-    err = dx - dy
++    x, y = x0, y0
++    sx = -1 if x0 > x1 else 1
++    sy = -1 if y0 > y1 else 1
+ 
+-    while True:
+-        points.append((x0, y0))
+-        if x0 == x1 and y0 == y1:
+-            break
+-        e2 = 2 * err
+-        if e2 > -dy:
++    if dx > dy:
++        err = dx / 2.0
++        while x != x1:
++            points.append((x, y))
+             err -= dy
+-            x0 += sx
+-        if e2 < dx:
+-            err += dx
+-            y0 += sy
++            if err < 0:
++                y += sy
++                err += dx
++            x += sx
++    else:
++        err = dy / 2.0
++        while y != y1:
++            points.append((x, y))
++            err -= dx
++            if err < 0:
++                x += sx
++                err += dy
++            y += sy
+ 
++    points.append((x, y))
+     return points
+</patch>"""
+
+problem_statement_prompt = """
+You will be provided with a partial code base and an issue statement explaining a problem to resolve.
         
-Issue: {problem}
+<issue>
+{problem}
+</issue>
 
-Generate a git code patch in unified diff format to be applied to relevant files to fix the above issue.
-
-Relevant code from the repository for the issues are given below:
+<code>
 {context}
+</code>
 
+Here is an example of a patch file. It consists of changes to the code base. 
+It specifies the file names, the line numbers of each change, and the removed and added lines. 
+A single patch file can contain changes to multiple files.
+"""
 
+final_inference_prompt = """
+I need you to solve the provided issue by generating a single patch file that I can apply 
+directly to this repository using git apply. Please respond with a single patch 
+file in the format shown above.
+
+Respond below:
+"""
+
+relevant_code_snippet_prompt = """
+<filepath>
+{filepath}
+</filepath>
+
+<code_content>
+{code}
+</code_content>
 """
 
 unified_diff_prompt = """

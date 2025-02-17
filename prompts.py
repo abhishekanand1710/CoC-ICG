@@ -6,6 +6,7 @@ statements by identifying the right changes to make in relevant code files.
 """
 
 diff_patch_example = """<patch>
+diff --git a/... b/...
 --- a/file.py
 +++ b/file.py
 @@ -1,27 +1,35 @@
@@ -80,8 +81,9 @@ A single patch file can contain changes to multiple files.
 
 final_inference_prompt = """
 I need you to solve the provided issue by generating a single patch file that I can apply 
-directly to this repository using git apply. Please respond with a single patch 
-file in the format shown above.
+directly to this repository using git apply. Each patch file can contain changes to multiple 
+files to fix the issue. Please respond with a single patch file in the format shown above.
+You must repsond with a single patch file in the format shown above.
 
 Respond below:
 """
@@ -96,12 +98,12 @@ relevant_code_snippet_prompt = """
 </code_content>
 """
 
-unified_diff_prompt = """
+unified_diff_prompt = """<patch_guidleine>
 Given below are 2 example diffs for the same change.
 
 Diff 1 - 
 
-```diff
+<dispreferred_patch>
 diff --git a/... b/...
 @@ ... @@
 -def factorial(n):
@@ -112,7 +114,7 @@ diff --git a/... b/...
      else:
 -        return n * factorial(n-1)
 +        return number * factorial(number-1)
-```
+</dispreferred_patch>
 
 The following "high level diff" of the same
 change is not as succinct as the minimal diff above,
@@ -122,7 +124,8 @@ on how to generate unified diffs for the problem statement.
 
 Diff 2 - 
 
-```diff
+<preferred_patch>
+diff --git a/... b/...
 @@ ... @@
 -def factorial(n):
 -    if n == 0:
@@ -134,5 +137,6 @@ Diff 2 -
 +        return 1
 +    else:
 +        return number * factorial(number-1)
-```
+</preferred_patch>
+</patch_guidleine>
 """

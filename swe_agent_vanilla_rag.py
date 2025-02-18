@@ -4,6 +4,7 @@ import json
 from tqdm import tqdm
 import argparse
 import traceback
+import glob
 
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
@@ -36,19 +37,32 @@ def init_backend(model):
         return ChatOpenAI(model=model)
     else:
         raise NotImplementedError(f"Support for {model} is not yet implemented.")
+    
+def find_non_utf_encoded_files_in_dir(dir):
+    invalid_files = []
+    for root, _, files in os.walk(dir):
+        for file in files:
+            file_path = os.path.join(root, file)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    f.read()
+            except UnicodeDecodeError:
+                invalid_files.append(file_path)
+    return invalid_files
 
 def process_repo(instance, base_dir: str):
     repo_dir = checkout_git_repo_at_commit(base_dir, repo_name=instance['repo'], commit=instance['base_commit'])
 
+    non_utf_files = find_non_utf_encoded_files_in_dir(repo_dir)
     loader = GenericLoader.from_filesystem(
         repo_dir,
         glob="**/*",
+        exclude=non_utf_files,
         suffixes=[".py"],
-        exclude=["**/non-utf8-encoding.py"],
         parser=LanguageParser(language=Language.PYTHON, parser_threshold=500),
+        # show_progress=True
     )
     documents = loader.load()
-
     text_splitter = RecursiveCharacterTextSplitter.from_language(
         language=Language.PYTHON, chunk_size=2000, chunk_overlap=200
     )
@@ -158,8 +172,6 @@ def main(args):
                 "model_name_or_path": args.model
             }
             preds.append(output)
-            if len(preds) == 50:
-                break
     except Exception as e:
         traceback.print_exc()
         

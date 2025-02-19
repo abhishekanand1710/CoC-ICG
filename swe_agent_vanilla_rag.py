@@ -28,6 +28,7 @@ llm = None
 class GraphState(TypedDict):
     instance_id: str
     problem: str
+    instance_repo: str
     documents: Optional[List[str]] = None
     context: Optional[str] = None
     patch: Optional[str] = None
@@ -79,18 +80,18 @@ def create_retriever(instance_id, splits):
         vectorstore = FAISS.from_documents(splits, embeddings)
         vectorstore.save_local(embeddings_path)
 
-    return vectorstore.as_retriever(k=50)
+    return vectorstore.as_retriever(search_kwargs={"k": 20})
 
 def retrieve_documents(state: GraphState):
     retriever = create_retriever(state["instance_id"], state["documents"])
     relevant_docs = retriever.invoke(state["problem"])
 
-    context = "\n".join([relevant_code_snippet_prompt.format(filepath = d.metadata['source'], code = d.page_content) for d in relevant_docs])
+    context = "\n".join([relevant_code_snippet_prompt.format(filepath = d.metadata['source'][len(state["instance_repo"]):], code = d.page_content) for d in relevant_docs])
     return {"context": context}
 
 def generate_patch(state: GraphState):
 
-    inference_prompt = f"{problem_statement_prompt}\n{diff_patch_example}\n{final_inference_prompt}"
+    inference_prompt = f"{sys_prompt}\n{problem_statement_prompt}\n{diff_patch_example}\n{final_inference_prompt}"
     prompt = ChatPromptTemplate.from_template(
         inference_prompt
     )
@@ -123,6 +124,7 @@ def run_inference(instance, base_repo_dir):
 
     initial_state = GraphState(
         instance_id=instance["instance_id"],
+        instance_repo=f"{base_repo_dir}/{instance['repo']}/",
         problem=instance["problem_statement"],
         documents=splits
     )
@@ -172,6 +174,9 @@ def main(args):
                 "model_name_or_path": args.model
             }
             preds.append(output)
+            if len(preds)%10 == 0:
+                with open(output_file, "w") as f:
+                    json.dump(preds, f)
     except Exception as e:
         traceback.print_exc()
         

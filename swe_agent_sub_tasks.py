@@ -19,7 +19,7 @@ import langchain
 
 from utils.git_utils import checkout_git_repo_at_commit
 from utils.response_utils import extract_patch_from_markdown
-from prompts_vanilla_rag import *
+from prompts_sub_tasks import *
 
 langchain.verbose = True
 
@@ -91,7 +91,7 @@ def retrieve_documents(state: GraphState):
 
 def generate_patch(state: GraphState):
 
-    inference_prompt = f"{sys_prompt}\n{problem_statement_prompt}\n{diff_patch_example}\n{final_inference_prompt}"
+    inference_prompt = f"{sys_prompt}\n{problem_statement_prompt}\n{unified_diff_prompt}\n{final_inference_prompt}"
     prompt = ChatPromptTemplate.from_template(
         inference_prompt
     )
@@ -133,7 +133,7 @@ def run_inference(instance, base_repo_dir):
     result = app.invoke(initial_state)
     patch = extract_patch_from_markdown(result["patch"])
 
-    return patch
+    return result["patch"], patch
 
 def load_processed_instances(output_file):
     if os.path.exists(output_file):
@@ -158,32 +158,48 @@ def main(args):
     if not os.path.exists(f"output/{run_id}"):
         os.mkdir(f"output/{run_id}")
 
-    output_file = f"output/{run_id}/prediction_vanilla_rag_{args.model}.json"
+    output_file = f"output/{run_id}/prediction_rag_sub_tasks_{args.model}.json"
+    responses_file = f"output/{run_id}/response_rag_sub_tasks_{args.model}.json"
     processed_instances = load_processed_instances(output_file)
+    responses = load_processed_instances(responses_file)
 
     dataset = load_local_dataset(args.input_file, processed_instances)
     print(f"Generating for {len(dataset)} samples.")
     
     preds = [value for _, value in processed_instances.items()]
+    cur_responses = [value for _, value in responses.items()]
     try:
         for key, test_instance in tqdm(dataset.items()):
-            patch = run_inference(test_instance, args.dir)
+            result, patch = run_inference(test_instance, args.dir)
             output = {
                 "instance_id": key,
                 "model_patch": patch,
                 "model_name_or_path": args.model
             }
             preds.append(output)
-            if len(preds)%10 == 0:
+
+            response_output = {
+                "instance_id": key,
+                "response": result,
+                "model_name_or_path": args.model
+            }
+            cur_responses.append(response_output)
+
+            if len(preds)%5 == 0:
                 with open(output_file, "w") as f:
                     json.dump(preds, f)
-    except Exception as e:
+                with open(responses_file, "w") as f:
+                    json.dump(cur_responses, f)
+    except Exception:
         traceback.print_exc()
         
     with open(output_file, "w") as f:
         json.dump(preds, f)
+    with open(responses_file, "w") as f:
+        json.dump(cur_responses, f)
     
     print(f"Predictions saved to {output_file}")
+    print(f"Responses saved to {responses_file}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SWE Agent using RAG")

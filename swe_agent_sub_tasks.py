@@ -91,7 +91,7 @@ def retrieve_documents(state: GraphState):
 
 def generate_patch(state: GraphState):
 
-    inference_prompt = f"{sys_prompt}\n{problem_statement_prompt}\n{unified_diff_prompt}\n{final_inference_prompt}"
+    inference_prompt = f"{sys_prompt}\n{problem_statement_prompt}\n{diff_patch_example}\n{final_inference_prompt}"
     prompt = ChatPromptTemplate.from_template(
         inference_prompt
     )

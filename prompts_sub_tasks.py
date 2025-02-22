@@ -64,7 +64,8 @@ diff --git a/... b/...
 </patch>"""
 
 problem_statement_prompt = """
-You will be provided with a partial code base and an issue statement explaining a problem to resolve.
+You will be provided with a partial code base that you have never seen before 
+and an issue statement explaining a bug in the codebase that needs to be resolved.
         
 <issue>
 {problem}
@@ -80,9 +81,10 @@ A single patch file can contain changes to multiple files.
 """
 
 final_inference_prompt = """
-I need you to solve the provided issue by breaking down the problem into sub-tasks and solving each
-sub-task one by one by generating the code wherever required. Don't include unit tests in your sub-tasks.
-Just focus on solving the issue.
+Solve the issue by breaking the process into sequential sub-tasks and generating code for each
+sub-task wherever required. Remember you can not execute code and hence, don't write unit tests.
+Determine the root cause of the issue and fix it by making appropriate changes to the code. 
+Perform your actions by breaking them into sub-tasks.
 
 Finally, generate a single patch file by combining the solution for each sub-task that I can apply 
 directly to this repository using git apply. Each patch file can contain changes to multiple 

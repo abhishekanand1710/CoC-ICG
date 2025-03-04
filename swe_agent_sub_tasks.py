@@ -15,13 +15,10 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langchain_text_splitters import Language
-import langchain
 
-from utils.git_utils import checkout_git_repo_at_commit
+from utils.repo_utils import checkout_git_repo_at_commit
 from utils.response_utils import extract_patch_from_markdown
 from prompts_sub_tasks import *
-
-langchain.verbose = True
 
 llm = None
 
@@ -118,7 +115,7 @@ def build_workflow():
     
     return workflow.compile()
 
-
+ 
 def run_inference(instance, base_repo_dir):
     splits = process_repo(instance, base_repo_dir)
 

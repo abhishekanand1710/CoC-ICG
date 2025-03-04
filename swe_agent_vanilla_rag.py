@@ -17,7 +17,7 @@ from langgraph.graph import StateGraph, END
 from langchain_text_splitters import Language
 import langchain
 
-from utils.git_utils import checkout_git_repo_at_commit
+from utils.repo_utils import checkout_git_repo_at_commit
 from utils.response_utils import extract_patch_from_markdown
 from prompts_vanilla_rag import *
 

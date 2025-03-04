@@ -5,3 +5,4 @@ SWE-bench
 **/__pycache__
 scrap.py
 .DS_Store
+set_envs.sh

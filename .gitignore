@@ -6,3 +6,5 @@ SWE-bench
 scrap.py
 .DS_Store
 set_envs.sh
+.vscode
+vendor

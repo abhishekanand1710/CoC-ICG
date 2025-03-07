@@ -9,6 +9,20 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
+def get_file_content(file_path: str) -> str:
+    if not os.path.exists(file_path):
+        return f"File '{file_path}' does not exist"
+    
+    if os.path.isdir(file_path):
+        return f"'{file_path}' is a directory, not a file"
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        return content
+    except UnicodeDecodeError:
+        return f"File '{file_path}' is not a text file or contains non-UTF-8 characters"
+
 def checkout_git_repo_at_commit(base_dir, repo_name, commit):
     instance_repo = Path(base_dir, repo_name)
 
@@ -66,3 +80,7 @@ def process_repo(instance, base_dir: str):
     splits = text_splitter.split_documents(documents)
     vectorstore = init_vectorstore(instance['instance_id'], splits)
     return vectorstore
+
+def process_repo_min(instance, base_dir: str):
+    repo_dir = checkout_git_repo_at_commit(base_dir, repo_name=instance['repo'], commit=instance['base_commit'])
+    return repo_dir

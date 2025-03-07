@@ -5,3 +5,93 @@ def extract_patch_from_markdown(text):
     pattern = r'```(?:patch|diff)\n(.*?)```'
     match = re.search(pattern, text, re.DOTALL)
     return match.group(1).rstrip() if match else None
+
+def parse_analysis_response(response):
+    if 'NEED_CONTEXT' in response:
+        response_lines = response.split('\n')
+        req_functions = []
+        req_classes = []
+        req_files = []
+        others = {}
+
+        for line in response_lines:
+            line = line.strip()
+            if 'NEED_CONTEXT' in line:
+                if 'FUNCTION' in line:
+                    func_name = line.split(' ')[-1].split('@')[0]
+                    req_functions.append(func_name)
+                elif 'CLASS' in line:
+                    class_name = line.split(' ')[-1].split('@')[0]
+                    req_classes.append(class_name)
+                elif 'FILE' in line:
+                    file = line.split(' ')[-1]
+                    req_files.append(file)
+                elif 'OTHER' in line:
+                    req = line.strip().split(' ')[-1].split('@')
+                    req = [v.strip() for v in req]
+                    others[req[0]] = req[1]
+
+        return {
+            "functions": req_functions,
+            "classes": req_classes,
+            "files": req_files,
+            "others": others
+        }
+    else:
+        return {}
+
+def parse_filter_response(response):
+    response_lines = response.split("\n")
+
+    is_relevant = False
+    selected_code_present = False
+    code_idx = None
+    for i, line in enumerate(response_lines):
+        line = line.strip()
+        if "IS_RELEVANT" in line:
+            if "no" in line.lower():
+                return False, None
+            if "yes" in line.lower():
+                is_relevant = True
+        if is_relevant and line.startswith('RELEVANT_CODE'):
+            selected_code_present = True
+            code_idx = i + 1
+            break
+    
+    if selected_code_present and code_idx:
+        code_block = '\n'.join(response_lines[code_idx:]).strip()
+        return is_relevant, code_block
+    
+    return is_relevant, None
+
+def parse_llm_response_old(response):
+    context_requests = []
+    solution = None
+    
+    context_match = re.search(r'NEED_CONTEXT\[(.*?)\]', response, re.DOTALL)
+    if context_match:
+        requests = [r.strip().strip('"') 
+                   for r in context_match.group(1).split(',') 
+                   if r.strip()]
+        context_requests = validate_requests(requests)
+    
+    solution_match = re.search(r'SOLUTION\[(.*?)\]', response, re.DOTALL)
+    if solution_match:
+        solution = solution_match.group(1).strip()
+    print(context_requests, solution)
+    return context_requests, solution
+
+def validate_requests(requests):
+    valid = []
+    pattern = re.compile(
+        r'^(\w+/)*[\w\.]+(\.\w+)?'  # Path
+        r'(::\w+)?'                 # Function/class
+        r'|:\d+-\d+$'               # Line range
+    )
+    
+    for req in requests:
+        if pattern.match(req):
+            valid.append(req)
+        else:
+            print(f"Invalid request format: {req}")
+    return valid

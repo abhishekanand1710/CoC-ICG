@@ -16,29 +16,33 @@ def parse_analysis_response(response):
 
         for line in response_lines:
             line = line.strip()
-            if 'NEED_CONTEXT' in line:
-                if 'FUNCTION' in line:
-                    func_name = line.split(' ')[-1].split('@')[0]
-                    req_functions.append(func_name)
-                elif 'CLASS' in line:
-                    class_name = line.split(' ')[-1].split('@')[0]
-                    req_classes.append(class_name)
-                elif 'FILE' in line:
-                    file = line.split(' ')[-1]
-                    req_files.append(file)
-                elif 'OTHER' in line:
-                    req = line.strip().split(' ')[-1].split('@')
-                    req = [v.strip() for v in req]
-                    others[req[0]] = req[1]
+            try:
+                if 'NEED_CONTEXT' in line:
+                    line, reason = line.split('|', 1)
+                    line = line.strip()
+                    if 'FUNCTION' in line:
+                        func_name = line.split(' ')[-1].split('@')[0]
+                        req_functions.append((func_name, reason))
+                    elif 'CLASS' in line:
+                        class_name = line.split(' ')[-1].split('@')[0]
+                        req_classes.append((class_name, reason))
+                    elif 'FILE' in line:
+                        file = line.split(' ')[-1]
+                        req_files.append((file, reason))
+                    elif 'OTHER' in line:
+                        req = line.strip().split(' ')[-1].split('@')
+                        req = [v.strip() for v in req]
+                        others[req[0]] = (req[1], reason)
+            except: continue
 
-        return {
+        return True, {
             "functions": req_functions,
             "classes": req_classes,
             "files": req_files,
             "others": others
         }
     else:
-        return {}
+        return False, response
 
 def parse_filter_response(response):
     response_lines = response.split("\n")
@@ -60,7 +64,12 @@ def parse_filter_response(response):
     
     if selected_code_present and code_idx:
         code_block = '\n'.join(response_lines[code_idx:]).strip()
-        return is_relevant, code_block
+        # Remove any code blocks at start/end
+        pattern = r'```python\n(.*?)```'
+        match = re.search(pattern, code_block, re.DOTALL)
+        if match:
+            return is_relevant, match.group(1).strip()
+        return is_relevant, None
     
     return is_relevant, None
 

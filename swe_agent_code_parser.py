@@ -222,7 +222,6 @@ def extract_import_info(match, code):
 
 def get_file_content(codebase_path, file_path):
     full_path = os.path.join(codebase_path, file_path)
-    print(full_path)
     with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
         return f.read()
     

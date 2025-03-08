@@ -5,6 +5,7 @@ from langchain_core.tools import tool
 from typing import List, Dict, Any, Literal, TypedDict, Optional
 from langgraph.graph import StateGraph, END
 from langchain_community.vectorstores import FAISS
+from langchain_core.runnables.config import RunnableConfig
 
 import git
 import os
@@ -122,7 +123,8 @@ def initialize(state: GraphState):
         "requested_context": [],
         "solution": None,
         "analysis_log": {},
-        "repo_path": state["repo_path"]
+        "repo_path": state["repo_path"],
+        "edit_files": List[str]
     }
 
 def analyze(state: GraphState):
@@ -140,17 +142,17 @@ def analyze(state: GraphState):
         "analysis_log": '\n'.join(state["analysis_log"].values())
     })
     response = result.content
-    context = parse_analysis_response(response)
+    req_context, parsed_response = parse_analysis_response(response)
     
-    if context:
+    if req_context:
         return {
             "iterations": state["iterations"] + 1,
-            "requested_context": context
+            "requested_context": parsed_response
         }
     else:
         return {
             "iterations": state["iterations"] + 1,
-            "solution": context
+            "solution": parsed_response
         }
 
 def retrieve(state: GraphState):
@@ -164,56 +166,64 @@ def retrieve(state: GraphState):
     analysis_log = state["analysis_log"]
 
     for func in functions:
-        fetched_context = query_context(func, "function", codebase_index, state["repo_path"])
+        key, reason = func
+        fetched_context = query_context(key, "function", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
         name, data = fetched_context
-        retrieved[func] = {
+        retrieved[key] = {
             "name": name,
             "file_path": data["file_path"],
             "content": data["definition"],
-            "retrieved_at": state["iterations"]
+            "retrieved_at": state["iterations"],
+            "reason": reason
         }
-        analysis_log[func] = f"NEED_CONTEXT: FUNCTION = {func}"
+        analysis_log[key] = f"NEED_CONTEXT: FUNCTION = {key}"
 
     for cls_ in classes:
-        fetched_context = query_context(cls_, "class", codebase_index, state["repo_path"])
+        key, reason = cls_
+        fetched_context = query_context(key, "class", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
         name, data = fetched_context
-        retrieved[cls_] = {
+        retrieved[key] = {
             "name": name,
             "file_path": data["file_path"],
             "content": data["definition"],
-            "retrieved_at": state["iterations"]
+            "retrieved_at": state["iterations"],
+            "reason": reason
         }
-        analysis_log[cls_] = f"NEED_CONTEXT: CLASS = {cls_}"
+        analysis_log[key] = f"NEED_CONTEXT: CLASS = {key}"
 
     for file in files:
-        fetched_context = query_context(file, "file", codebase_index, state["repo_path"])
+        key, reason = file
+        fetched_context = query_context(key, "file", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
         file_path, data = fetched_context
-        retrieved[file] = {
+        retrieved[key] = {
             "name": file_path.split("/")[-1],
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"]
+            "retrieved_at": state["iterations"],
+            "reason": reason
         }
-        analysis_log[file] = f"NEED_CONTEXT: FILE = {file}"
+        analysis_log[key] = f"NEED_CONTEXT: FILE = {key}"
 
     for entity, file in others.items():
-        fetched_context = query_context(file, "file", codebase_index, state["repo_path"])
+        key, reason = file
+        fetched_context = query_context(key, "file", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
         file_path, data = fetched_context
-        retrieved[entity] = {
-            "name": file_path.split("/")[-1],
+        retrieved[f"{entity}@{key}"] = {
+            "name": f"{entity}@{key}",
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"]
+            "retrieved_at": state["iterations"],
+            "reason": reason
         }
-        analysis_log[file] = f"NEED_CONTEXT: OTHER = {entity}@{file}"
+        analysis_log[f"{entity}@{key}"] = f"NEED_CONTEXT: OTHER = {entity}@{key}"
     
     return {
         "context_chain": state["context_chain"],
@@ -230,6 +240,8 @@ def filter_context(state: GraphState):
 
     if candidate_context:
         context_str = format_context_chain(state["context_chain"])
+        if not context_str:
+            context_str = "No relevant code fetched yet."
         for query, context in candidate_context.items():
             candidate_context_str = format_context_chain([context])
 
@@ -238,6 +250,7 @@ def filter_context(state: GraphState):
             result = chain.invoke({
                 "issue_description": state["issue"],
                 "context_str": context_str,
+                "reason": context["reason"].removesuffix("Reason:").strip(),
                 "candidate_context_str": candidate_context_str,
             })
             response = result.content
@@ -252,11 +265,24 @@ def filter_context(state: GraphState):
                 if query in analysis_log:
                     analysis_log[query] = analysis_log[query] + " -> Code was irrelevant. Don't request it again."
 
-        
     return {
-        "context_chain": state["context_chain"],
+        "context_chain": context_chain,
         "analysis_log": analysis_log
     }
+
+def solve(state: GraphState):
+    solution = state["solution"]
+    context_str = format_context_chain(state["context_chain"])
+    agent_prompt = ChatPromptTemplate.from_template(PATCH_GENERATION_PROMPT)
+    chain = agent_prompt | llm
+    result = chain.invoke({
+        "issue_description": state["issue"],
+        "code_context": context_str,
+        "solution": solution
+    })
+    response = result.content
+    
+
 
 def create_agent_graph():
     workflow = StateGraph(GraphState)
@@ -265,7 +291,8 @@ def create_agent_graph():
     workflow.add_node("analyze", analyze)
     workflow.add_node("retrieve", retrieve)
     workflow.add_node("filter", filter_context)
-    workflow.add_node("solve", lambda s: s)
+    workflow.add_node("solve", solve)
+    workflow.add_node("generate_patch", lambda s: s)
 
     workflow.add_conditional_edges(
         "analyze",
@@ -276,7 +303,7 @@ def create_agent_graph():
     workflow.add_edge("init", "analyze")
     workflow.add_edge("retrieve", "filter")
     workflow.add_edge("filter", "analyze")
-    workflow.add_edge("solve", END)
+    workflow.add_edge("generate_patch", END)
 
     workflow.set_entry_point("init")
     
@@ -289,9 +316,11 @@ def run_inference(instance, base_repo_dir, max_steps = 10):
     codebase_index = analyze_codebase(repo_path)
     
     app = create_agent_graph()
+    config = RunnableConfig(recursion_limit=30)
+
     files_list = get_repository_files_list(base_repo_dir, instance['repo'])
     
-    result = app.invoke(GraphState(issue=instance["problem_statement"], repo_path=repo_path))
+    result = app.invoke(GraphState(issue=instance["problem_statement"], repo_path=repo_path), config=config)
     return result
 
 def main(args):
@@ -312,6 +341,7 @@ def main(args):
     try:
         cnt = 0
         for key, test_instance in tqdm(dataset.items()):
+            # print(key)
             # if cnt == 0:
             #     cnt += 1
             #     continue

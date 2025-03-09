@@ -169,7 +169,8 @@ def extract_function_info(match, code):
     return {
         "name": function_name,
         "signature": function_sig,
-        "definition": function_def
+        "definition": function_def,
+        "line_range": (start_row+1, body_end_row+1)
     }
 
 def extract_class_info(match, code):
@@ -190,7 +191,8 @@ def extract_class_info(match, code):
     
     return {
         "name": class_name,
-        "definition": class_def
+        "definition": class_def,
+        "line_range": (start_row+1, body_end_row+1)
     }
 
 def extract_global_info(match, code):
@@ -238,25 +240,46 @@ def analyze_codebase(codebase_path, output_path='file_structure.json', max_files
     
     context = extract_codebase_context(codebase_path, max_files)
     
-    if output_path:
-        with open(output_path, 'w', encoding='utf-8') as f:
-            json.dump(context['file_structure'], f, indent=2)
+    # if output_path:
+    #     with open(output_path, 'w', encoding='utf-8') as f:
+    #         json.dump(context['file_structure'], f, indent=2)
     
     return context
     
-def query_context(query, type, context, codebase_path):
+def query_context(query, type, context, codebase_path, include_line_numbers = True):
+    matched_key, code = None, None
     if type == "function":
         keys = list(context['functions'].keys())
         matched_key = closest_match(query, keys)
-        return matched_key, context['functions'][matched_key]
+        code = context['functions'][matched_key].copy()
     elif type == "class":
         keys = list(context['classes'].keys())
         matched_key = closest_match(query, keys)
-        return matched_key, context['classes'][matched_key]
+        code = context['classes'][matched_key].copy()
     else:
         for module in context["modules"]:
             if module["path"].endswith(query) or query in module["path"]:
-                return module["path"], get_file_content(codebase_path, module["path"])
+                matched_key = module["path"]
+                code = get_file_content(codebase_path, module["path"])
+            
+    
+    if matched_key:
+        if isinstance(code, Dict):
+            code_lines = code['definition'].split('\n')
+            if 'line_range' in code:
+                line_range = code['line_range']
+                for i in range(len(code_lines)):
+                    code_lines[i] = f"{line_range[0]+i}\t{code_lines[i]}"
+            code_str = '\n'.join(code_lines)
+            code['definition'] = code_str
+            return matched_key, code
+        elif isinstance(code, str):
+            code_lines = code.split('\n')
+            line_range = (1, len(code_lines))
+            for i in range(len(code_lines)):
+                code_lines[i] = f"{line_range[0]+i}\t{code_lines[i]}"
+            code_str = '\n'.join(code_lines)
+            return matched_key, code_str
             
 
 context = analyze_codebase('swe_bench_cache/repos/astropy/astropy/astropy/modeling')

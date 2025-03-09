@@ -1,6 +1,8 @@
 import git
 from pathlib import Path
 import os
+import subprocess
+import tempfile
 
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
@@ -84,3 +86,68 @@ def process_repo(instance, base_dir: str):
 def process_repo_min(instance, base_dir: str):
     repo_dir = checkout_git_repo_at_commit(base_dir, repo_name=instance['repo'], commit=instance['base_commit'])
     return repo_dir
+
+def apply_edits(file_path, edits):
+    with open(file_path, 'r') as f:
+        content = f.read().split('\n')
+    
+    for start, end, new_lines in sorted(edits, reverse=True):
+        if start <= end:  # replace/remove
+            start_idx = start - 1
+            end_idx = end
+            if new_lines:
+                content[start_idx:end_idx] = [new_lines]
+            else:
+                del content[start_idx:end_idx]
+        else:  # insert (start > end)
+            insert_pos = end
+            content[insert_pos:insert_pos] = new_lines
+    
+    return '\n'.join(content)
+
+def generate_patch_file(file_edits, codebase_path):
+    repo_path = os.path.abspath(codebase_path)
+    orig_dir = os.getcwd()
+
+    try:
+        os.chdir(repo_path)
+        status = subprocess.run(['git', 'status', '--porcelain'], capture_output=True, text=True)
+        if status.stdout.strip():
+            raise ValueError("Repo has uncommitted changes")
+        
+        patch_file = tempfile.NamedTemporaryFile(delete=False, suffix='.patch')
+        patch_file.close()
+
+        old_file_contents = {}
+        for file, edits in file_edits.items():
+            file_path = f"{repo_path}/{file}"
+
+            with open(file_path, 'r') as f:
+                old_file_content = f.read()
+            new_file_content = apply_edits(file_path, edits)
+
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(new_file_content)
+
+            old_file_contents[file_path] = old_file_content
+
+        subprocess.run(['git', 'diff', '--no-color'], stdout=open(patch_file.name, 'w'), check=True)
+        with open(patch_file.name, 'r', encoding='utf-8') as f:
+            patch_content = f.read()
+
+        for file_path, content in old_file_contents.items():
+            full_path = os.path.join(repo_path, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+        
+        os.unlink(patch_file.name)
+        return patch_content
+    finally:
+        os.chdir(orig_dir)
+    
+
+
+    
+
+
+

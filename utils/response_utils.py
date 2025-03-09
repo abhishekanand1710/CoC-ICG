@@ -44,6 +44,17 @@ def parse_analysis_response(response):
     else:
         return False, response
 
+def parse_file_request_response(response):
+    response_lines = response.split("\n")
+    file_requests = []
+    for line in response_lines:
+        line = line.strip()
+        if "FILE_REQUEST"  in line:
+            file_path = re.search(r'FILE_REQUEST:\s*([\w/\.]+)', line)
+            if file_path:
+                file_requests.append(file_path.group(1))
+    return file_requests
+
 def parse_filter_response(response):
     response_lines = response.split("\n")
 
@@ -73,34 +84,46 @@ def parse_filter_response(response):
     
     return is_relevant, None
 
-def parse_llm_response_old(response):
-    context_requests = []
-    solution = None
-    
-    context_match = re.search(r'NEED_CONTEXT\[(.*?)\]', response, re.DOTALL)
-    if context_match:
-        requests = [r.strip().strip('"') 
-                   for r in context_match.group(1).split(',') 
-                   if r.strip()]
-        context_requests = validate_requests(requests)
-    
-    solution_match = re.search(r'SOLUTION\[(.*?)\]', response, re.DOTALL)
-    if solution_match:
-        solution = solution_match.group(1).strip()
-    print(context_requests, solution)
-    return context_requests, solution
+def parse_file_edit_response(response):
+    pattern = r'EDIT CODE (\d+),(\d+):\s*```python\n(.*?)```'
+    matches = re.finditer(pattern, response, re.DOTALL)
+    code_edit_snippets = []
+    for match in matches:
+        start_line = int(match.group(1))
+        end_line = int(match.group(2))
+        code = match.group(3)
+        code_edit_snippets.append((start_line, end_line, code))
+    return code_edit_snippets
 
-def validate_requests(requests):
-    valid = []
-    pattern = re.compile(
-        r'^(\w+/)*[\w\.]+(\.\w+)?'  # Path
-        r'(::\w+)?'                 # Function/class
-        r'|:\d+-\d+$'               # Line range
-    )
+
+# def parse_llm_response_old(response):
+#     context_requests = []
+#     solution = None
     
-    for req in requests:
-        if pattern.match(req):
-            valid.append(req)
-        else:
-            print(f"Invalid request format: {req}")
-    return valid
+#     context_match = re.search(r'NEED_CONTEXT\[(.*?)\]', response, re.DOTALL)
+#     if context_match:
+#         requests = [r.strip().strip('"') 
+#                    for r in context_match.group(1).split(',') 
+#                    if r.strip()]
+#         context_requests = validate_requests(requests)
+    
+#     solution_match = re.search(r'SOLUTION\[(.*?)\]', response, re.DOTALL)
+#     if solution_match:
+#         solution = solution_match.group(1).strip()
+#     print(context_requests, solution)
+#     return context_requests, solution
+
+# def validate_requests(requests):
+#     valid = []
+#     pattern = re.compile(
+#         r'^(\w+/)*[\w\.]+(\.\w+)?'  # Path
+#         r'(::\w+)?'                 # Function/class
+#         r'|:\d+-\d+$'               # Line range
+#     )
+    
+#     for req in requests:
+#         if pattern.match(req):
+#             valid.append(req)
+#         else:
+#             print(f"Invalid request format: {req}")
+#     return valid

@@ -37,6 +37,8 @@ class GraphState(TypedDict):
     solution: Optional[str]
     analysis_log: Dict
     repo_path: str
+    patch_files: List[str]
+    file_edits: Dict
 
 
 def init_backend(model):
@@ -93,7 +95,7 @@ def format_context_chain(context_chain: List[Dict]):
     context_str = ""
     for context in context_chain:
         content = context['content'].removeprefix('```python')
-        content = content.removesuffix('```')
+        content = content.removesuffix('```').strip()
 
         name = context["name"]
         if not name.endswith('.py'):
@@ -124,7 +126,8 @@ def initialize(state: GraphState):
         "solution": None,
         "analysis_log": {},
         "repo_path": state["repo_path"],
-        "edit_files": List[str]
+        "patch_files": List[str],
+        "file_edits": {}
     }
 
 def analyze(state: GraphState):
@@ -273,7 +276,7 @@ def filter_context(state: GraphState):
 def solve(state: GraphState):
     solution = state["solution"]
     context_str = format_context_chain(state["context_chain"])
-    agent_prompt = ChatPromptTemplate.from_template(PATCH_GENERATION_PROMPT)
+    agent_prompt = ChatPromptTemplate.from_template(REQUEST_FILES_TO_BE_EDITED_PROMPT)
     chain = agent_prompt | llm
     result = chain.invoke({
         "issue_description": state["issue"],
@@ -281,8 +284,42 @@ def solve(state: GraphState):
         "solution": solution
     })
     response = result.content
-    
+    patch_files = parse_file_request_response(response)
+    return {
+        "patch_files": patch_files
+    }
 
+def generate_patch(state: GraphState):
+    patch_files = state["patch_files"]
+    context_chain = state["context_chain"]
+
+    patch_context_dict = {file: [] for file in patch_files}
+    for context in context_chain:
+        if context["file_path"] in patch_context_dict:
+            patch_context_dict[context["file_path"]].append(context)
+
+    edited_patch_files = []
+    file_edit_snippets_dict = {}
+    for file, file_relevant_context in patch_context_dict.items():
+        file_relevant_context_str = format_context_chain(file_relevant_context)
+
+        agent_prompt = ChatPromptTemplate.from_template(PATCH_GENERATION_PROMPT)
+        chain = agent_prompt | llm
+        result = chain.invoke({
+            "issue_description": state["issue"],
+            "solution": state["solution"],
+            "patch_files": "\n".join(patch_files),
+            "edited_patch_files": "\n".join(edited_patch_files),
+            "current_file": file,
+            "cur_code_context": file_relevant_context_str
+        })
+        response = result.content
+        file_edit_snippets = parse_file_edit_response(response)
+        file_edit_snippets_dict[file] = file_edit_snippets
+
+    return {
+        "file_edits": file_edit_snippets_dict
+    }
 
 def create_agent_graph():
     workflow = StateGraph(GraphState)
@@ -292,7 +329,8 @@ def create_agent_graph():
     workflow.add_node("retrieve", retrieve)
     workflow.add_node("filter", filter_context)
     workflow.add_node("solve", solve)
-    workflow.add_node("generate_patch", lambda s: s)
+    workflow.add_node("generate_patch", generate_patch)
+    workflow.add_node("save", lambda s: s)
 
     workflow.add_conditional_edges(
         "analyze",
@@ -303,20 +341,22 @@ def create_agent_graph():
     workflow.add_edge("init", "analyze")
     workflow.add_edge("retrieve", "filter")
     workflow.add_edge("filter", "analyze")
-    workflow.add_edge("generate_patch", END)
+    workflow.add_edge("solve", "generate_patch")
+    workflow.add_edge("generate_patch", "save")
+    workflow.add_edge("save", END)
 
     workflow.set_entry_point("init")
     
     return workflow.compile()
 
-def run_inference(instance, base_repo_dir, max_steps = 10):
+def run_inference(instance, base_repo_dir, run_id, max_steps = 70):
     global files_list, vectorstore, codebase_index
     repo_path = process_repo_min(instance, base_repo_dir)
 
     codebase_index = analyze_codebase(repo_path)
     
     app = create_agent_graph()
-    config = RunnableConfig(recursion_limit=30)
+    config = RunnableConfig(recursion_limit=max_steps, tags=[run_id])
 
     files_list = get_repository_files_list(base_repo_dir, instance['repo'])
     
@@ -339,21 +379,26 @@ def main(args):
     preds = [value for _, value in processed_instances.items()]
     cur_responses = [value for _, value in responses.items()]
     try:
-        cnt = 0
         for key, test_instance in tqdm(dataset.items()):
-            # print(key)
-            # if cnt == 0:
-            #     cnt += 1
-            #     continue
-            result = run_inference(test_instance, args.dir)
-            print(result["final_patch"])
-            break
-            # output = {
-            #     "instance_id": key,
-            #     "model_patch": patch,
-            #     "model_name_or_path": args.model
-            # }
-            # preds.append(output)
+            try:
+                result = run_inference(test_instance, args.dir, run_id)
+                result_patch = generate_patch_file(result["file_edits"], result["repo_path"])
+
+                output = {
+                    "instance_id": key,
+                    "model_patch": result_patch,
+                    "model_name_or_path": args.model
+                }
+                preds.append(output)
+            except Exception:
+                traceback.print_exc()
+                output = {
+                    "instance_id": key,
+                    "model_patch": "",
+                    "model_name_or_path": args.model
+                }
+                preds.append(output)
+                continue
 
             # response_output = {
             #     "instance_id": key,
@@ -365,18 +410,19 @@ def main(args):
             if len(preds)%5 == 0:
                 with open(output_file, "w") as f:
                     json.dump(preds, f)
-                with open(responses_file, "w") as f:
-                    json.dump(cur_responses, f)
+                # with open(responses_file, "w") as f:
+                #     json.dump(cur_responses, f)
+            
     except Exception:
         traceback.print_exc()
         
     with open(output_file, "w") as f:
         json.dump(preds, f)
-    with open(responses_file, "w") as f:
-        json.dump(cur_responses, f)
+    # with open(responses_file, "w") as f:
+    #     json.dump(cur_responses, f)
     
     print(f"Predictions saved to {output_file}")
-    print(f"Responses saved to {responses_file}")
+    # print(f"Responses saved to {responses_file}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SWE Agent using RAG")

@@ -368,8 +368,8 @@ def main(args):
     if not os.path.exists(f"output/{run_id}"):
         os.mkdir(f"output/{run_id}")
 
-    output_file = f"output/{run_id}/prediction_rag_sub_tasks_{args.model}.json"
-    responses_file = f"output/{run_id}/response_rag_sub_tasks_{args.model}.json"
+    output_file = f"output/{run_id}/prediction_coc_{args.model}.json"
+    responses_file = f"output/{run_id}/response_coc_{args.model}.json"
     processed_instances = load_processed_instances(output_file)
     responses = load_processed_instances(responses_file)
 

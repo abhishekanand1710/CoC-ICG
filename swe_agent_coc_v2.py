@@ -173,9 +173,8 @@ Carefully analyze the issue, available code information and the codebase structu
     analysis_log = '\n'.join(state["analysis_log"].values()) if state["analysis_log"] else "There are no previous requests at this point."
     result = chain.invoke({
         "issue_description": state["issue"],
-        "repo_structure": state["repo_structure"],
+        # "repo_structure": state["repo_structure"],
         "cur_iteration": state["iterations"],
-        "file_structure": "File structure not available",
         "context_str": context_str,
         "analysis_log": analysis_log,
         "iteration_check_statement": iteration_check_statement

@@ -12,9 +12,6 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
 ## Issue:
 {issue_description}
 
-## Available Codebase Structure:
-{repo_structure}
-
 ## Current Context (Iteration {cur_iteration}):
 {context_str}
 

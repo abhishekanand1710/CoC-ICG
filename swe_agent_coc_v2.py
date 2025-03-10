@@ -27,18 +27,23 @@ vectorstore = None
 files_list = []
 codebase_index = None
 
+MAX_STEPS = 70
 
 class GraphState(TypedDict):
+    instance_id: str
     issue: str
     iterations: int
     context_chain: List[dict]
+    retrieved_keys: set
     candidate_context: Dict
     requested_context: Dict
+    analysis: Optional[str]
     solution: Optional[str]
     analysis_log: Dict
     repo_path: str
     patch_files: List[str]
     file_edits: Dict
+    repo_structure: str
 
 
 def init_backend(model):
@@ -111,6 +116,25 @@ def format_context_chain(context_chain: List[Dict]):
 
     return context_str
 
+def format_candidate_context(context: Dict, reason: str):
+    context_str = ""
+    content = context['content'].removeprefix('```python')
+    content = content.removesuffix('```').strip()
+
+    name = context["name"]
+    if not name.endswith('.py'):
+        name = name.split(".")[-1]
+
+    context_str = CANDIDATE_CONTEXT_TEMPLATE.format(
+        name = name,
+        reason = reason,
+        file_path = context["file_path"],
+        content = content,
+        iteration = context["retrieved_at"]
+    )
+
+    return context_str
+
 #####################################################
 
 
@@ -118,11 +142,14 @@ def format_context_chain(context_chain: List[Dict]):
 
 def initialize(state: GraphState):
     return {
+        "instance_id": state["instance_id"],
         "issue": state["issue"],
         "iterations": 0,
         "context_chain": [],
+        "retrieved_keys": set(),
         "candidate_context": [],
         "requested_context": [],
+        "analysis": None,
         "solution": None,
         "analysis_log": {},
         "repo_path": state["repo_path"],
@@ -137,13 +164,23 @@ def analyze(state: GraphState):
 
     agent_prompt = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
     chain = agent_prompt | llm
+
+    iteration_check_statement = ""
+    if state["iterations"] > MAX_STEPS - 10:
+        iteration_check_statement = """This is iteration - {state["iterations"] and you have exhausted all your turns for requesting more code.
+Carefully analyze the issue, available code information and the codebase structure to debug the issue and provide the solution in the required format."""
+
+    analysis_log = '\n'.join(state["analysis_log"].values()) if state["analysis_log"] else "There are no previous requests at this point."
     result = chain.invoke({
         "issue_description": state["issue"],
+        "repo_structure": state["repo_structure"],
         "cur_iteration": state["iterations"],
         "file_structure": "File structure not available",
         "context_str": context_str,
-        "analysis_log": '\n'.join(state["analysis_log"].values())
+        "analysis_log": analysis_log,
+        "iteration_check_statement": iteration_check_statement
     })
+    
     response = result.content
     req_context, parsed_response = parse_analysis_response(response)
     
@@ -155,7 +192,7 @@ def analyze(state: GraphState):
     else:
         return {
             "iterations": state["iterations"] + 1,
-            "solution": parsed_response
+            "analysis": parsed_response
         }
 
 def retrieve(state: GraphState):
@@ -168,8 +205,14 @@ def retrieve(state: GraphState):
 
     analysis_log = state["analysis_log"]
 
+    retrieved_keys = state["retrieved_keys"]
+
     for func in functions:
         key, reason = func
+        if key in retrieved_keys:
+            continue
+        retrieved_keys.add(key)
+
         fetched_context = query_context(key, "function", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
@@ -185,6 +228,10 @@ def retrieve(state: GraphState):
 
     for cls_ in classes:
         key, reason = cls_
+        if key in retrieved_keys:
+            continue
+        retrieved_keys.add(key)
+
         fetched_context = query_context(key, "class", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
@@ -200,6 +247,10 @@ def retrieve(state: GraphState):
 
     for file in files:
         key, reason = file
+        if key in retrieved_keys:
+            continue
+        retrieved_keys.add(key)
+
         fetched_context = query_context(key, "file", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
@@ -215,6 +266,10 @@ def retrieve(state: GraphState):
 
     for entity, file in others.items():
         key, reason = file
+        if key in retrieved_keys:
+            continue
+        retrieved_keys.add(key)
+
         fetched_context = query_context(key, "file", codebase_index, state["repo_path"])
         if not fetched_context:
             continue
@@ -232,7 +287,9 @@ def retrieve(state: GraphState):
         "context_chain": state["context_chain"],
         "candidate_context": retrieved,
         "requested_context": [],
-        "analysis_log": analysis_log
+        "analysis_log": analysis_log,
+        "iterations": state["iterations"] + 1,
+        "retrieved_keys": retrieved_keys
     }
 
 def filter_context(state: GraphState):
@@ -242,38 +299,56 @@ def filter_context(state: GraphState):
     analysis_log = state["analysis_log"]
 
     if candidate_context:
-        context_str = format_context_chain(state["context_chain"])
+        context_str = format_context_chain(context_chain)
         if not context_str:
             context_str = "No relevant code fetched yet."
         for query, context in candidate_context.items():
-            candidate_context_str = format_context_chain([context])
+            candidate_context_str = format_candidate_context(context, context["reason"].strip().removesuffix("Reason:").strip())
 
             agent_prompt = ChatPromptTemplate.from_template(FILTER_PROMPT)
             chain = agent_prompt | llm
             result = chain.invoke({
                 "issue_description": state["issue"],
                 "context_str": context_str,
-                "reason": context["reason"].removesuffix("Reason:").strip(),
                 "candidate_context_str": candidate_context_str,
             })
             response = result.content
 
             is_relevant, code = parse_filter_response(response)
             if is_relevant:
-                if code:
-                    context["content"] = code
+                # if code:
+                #     context["content"] = code
                 context_chain.append(context)
                 analysis_log[query] = analysis_log[query] + " -> Code was relevant and is included above."
             else:
                 if query in analysis_log:
                     analysis_log[query] = analysis_log[query] + " -> Code was irrelevant. Don't request it again."
+            
+            context_str = format_context_chain(context_chain)
 
     return {
         "context_chain": context_chain,
-        "analysis_log": analysis_log
+        "analysis_log": analysis_log,
+        "iterations": state["iterations"] + 1
     }
 
 def solve(state: GraphState):
+    analysis = state["analysis"]
+    context_str = format_context_chain(state["context_chain"])
+    agent_prompt = ChatPromptTemplate.from_template(SOLVE_PROMPT)
+    chain = agent_prompt | llm
+    result = chain.invoke({
+        "issue_description": state["issue"],
+        "context_str": context_str,
+        "analysis": analysis
+    })
+    response = result.content
+    return {
+        "solution": response,
+        "iterations": state["iterations"] + 1
+    }
+
+def localize(state: GraphState):
     solution = state["solution"]
     context_str = format_context_chain(state["context_chain"])
     agent_prompt = ChatPromptTemplate.from_template(REQUEST_FILES_TO_BE_EDITED_PROMPT)
@@ -286,7 +361,8 @@ def solve(state: GraphState):
     response = result.content
     patch_files = parse_file_request_response(response)
     return {
-        "patch_files": patch_files
+        "patch_files": patch_files,
+        "iterations": state["iterations"] + 1
     }
 
 def generate_patch(state: GraphState):
@@ -318,7 +394,8 @@ def generate_patch(state: GraphState):
         file_edit_snippets_dict[file] = file_edit_snippets
 
     return {
-        "file_edits": file_edit_snippets_dict
+        "file_edits": file_edit_snippets_dict,
+        "iterations": state["iterations"] + 1
     }
 
 def create_agent_graph():
@@ -329,6 +406,7 @@ def create_agent_graph():
     workflow.add_node("retrieve", retrieve)
     workflow.add_node("filter", filter_context)
     workflow.add_node("solve", solve)
+    workflow.add_node("localize", localize)
     workflow.add_node("generate_patch", generate_patch)
     workflow.add_node("save", lambda s: s)
 
@@ -341,7 +419,8 @@ def create_agent_graph():
     workflow.add_edge("init", "analyze")
     workflow.add_edge("retrieve", "filter")
     workflow.add_edge("filter", "analyze")
-    workflow.add_edge("solve", "generate_patch")
+    workflow.add_edge("solve", "localize")
+    workflow.add_edge("localize", "generate_patch")
     workflow.add_edge("generate_patch", "save")
     workflow.add_edge("save", END)
 
@@ -349,18 +428,27 @@ def create_agent_graph():
     
     return workflow.compile()
 
-def run_inference(instance, base_repo_dir, run_id, max_steps = 70):
+def run_inference(instance, base_repo_dir, run_id):
     global files_list, vectorstore, codebase_index
-    repo_path = process_repo_min(instance, base_repo_dir)
 
+    repo_path = process_repo_min(instance, base_repo_dir)
+    repo_structure = generate_repo_structure(repo_path)
     codebase_index = analyze_codebase(repo_path)
     
     app = create_agent_graph()
-    config = RunnableConfig(recursion_limit=max_steps, tags=[run_id])
+    config = RunnableConfig(recursion_limit=MAX_STEPS, tags=[run_id])
 
     files_list = get_repository_files_list(base_repo_dir, instance['repo'])
     
-    result = app.invoke(GraphState(issue=instance["problem_statement"], repo_path=repo_path), config=config)
+    result = app.invoke(
+        GraphState(
+            instance_id=instance["instance_id"],
+            issue=instance["problem_statement"], 
+            repo_path=repo_path,
+            repo_structure=repo_structure
+        ), 
+        config=config
+    )
     return result
 
 def main(args):
@@ -369,21 +457,17 @@ def main(args):
         os.mkdir(f"output/{run_id}")
 
     output_file = f"output/{run_id}/prediction_coc_{args.model}.json"
-    responses_file = f"output/{run_id}/response_coc_{args.model}.json"
     processed_instances = load_processed_instances(output_file)
-    responses = load_processed_instances(responses_file)
 
     dataset = load_local_dataset(args.input_file, processed_instances)
     print(f"Generating for {len(dataset)} samples.")
     
     preds = [value for _, value in processed_instances.items()]
-    cur_responses = [value for _, value in responses.items()]
     try:
         for key, test_instance in tqdm(dataset.items()):
             try:
                 result = run_inference(test_instance, args.dir, run_id)
                 result_patch = generate_patch_file(result["file_edits"], result["repo_path"])
-
                 output = {
                     "instance_id": key,
                     "model_patch": result_patch,
@@ -398,20 +482,10 @@ def main(args):
                     "model_name_or_path": args.model
                 }
                 preds.append(output)
-                continue
-
-            # response_output = {
-            #     "instance_id": key,
-            #     "response": result,
-            #     "model_name_or_path": args.model
-            # }
-            # cur_responses.append(response_output)
 
             if len(preds)%5 == 0:
                 with open(output_file, "w") as f:
                     json.dump(preds, f)
-                # with open(responses_file, "w") as f:
-                #     json.dump(cur_responses, f)
             
     except Exception:
         traceback.print_exc()

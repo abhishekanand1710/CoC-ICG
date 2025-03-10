@@ -227,6 +227,37 @@ def get_file_content(codebase_path, file_path):
     with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
         return f.read()
     
+def generate_repo_structure(root_path, indent="\t", max_depth=None):
+    ignored = ['.git', '__pycache__', '.DS_Store', 'tests']
+    
+    result = []
+    root_name = os.path.basename(os.path.abspath(root_path))
+    result.append(f"{root_name}/")
+    
+    def walk_dir(directory, depth=0):
+        if max_depth is not None and depth >= max_depth:
+            return
+        
+        items = []
+        for name in sorted(os.listdir(directory)):
+            path = os.path.join(directory, name)
+            if any(p in path for p in ignored):
+                continue
+            is_dir = os.path.isdir(path)
+            is_python = name.endswith('.py')
+            
+            if is_dir or is_python:
+                items.append((name, path, is_dir))
+            
+        for name, path, is_dir in sorted(items, key=lambda x: (not x[2], x[0].lower())):
+            result.append(f"{indent * (depth + 1)}{name}{'/' if is_dir else ''}")
+            if is_dir:
+                walk_dir(path, depth + 1)
+    
+    walk_dir(root_path)
+    structure = "\n".join(result)
+    return structure
+
 def closest_match(target, string_list):
     original_strings = string_list.copy()
     processed_strings = [s.split('.')[-1] for s in string_list]
@@ -282,5 +313,6 @@ def query_context(query, type, context, codebase_path, include_line_numbers = Tr
             return matched_key, code_str
             
 
-context = analyze_codebase('swe_bench_cache/repos/astropy/astropy/astropy/modeling')
+# context = analyze_codebase('swe_bench_cache/repos/astropy/astropy/astropy/modeling')
 # print(query_context('_separable', 'function', context, 'blah'))
+# generate_repo_structure('swe_bench_cache/repos/django/django')

@@ -7,27 +7,34 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
 5. If the issue can't be debugged with the given code context, request SPECIFIC code elements using EXACT entity names or paths from the codebase.
   For eg - a particular function definition, class definition, variables, files or any other Pyhton entities.
 6. Iteratively narrow down based on context.
-7. Provide final solution as a git patch file.
+7. Provide final step by step analysis of the issue based on the issue description and the code from the repository.
 
 ## Issue:
 {issue_description}
 
 ## Available Codebase Structure:
-{file_structure}
+{repo_structure}
 
 ## Current Context (Iteration {cur_iteration}):
 {context_str}
 
+## PREVIOUS REQUESTS:
+{analysis_log}
+
 ## Guidelines:
 - FIRST try to solve with existing context looking at each code line carefully.
 - Check existing code and analyze what additional information is required to debug the issue and solve it.
-- If the additional information required is present, then use it or else request for it.
+- First find the required information in the code provided and use it.
+- If the additional information required is not present then request for it.
+- Always try to find complete information required to fix the issue.
 - For requesting additional code, look at the issue and the provided code and think
   what extra information you need for finding the root cause of the issue.
+- Differentiate between what are user's code entities given in the issue and what are repository entities.
+  Only request entities that maybe present in the repository as that would help you solve the issue.
 - These are the different types of entities you can request - 
-  1. FUNCTION - for functions
-  2. CLASS - for classes
-  3. FILE - for entire file
+  1. FUNCTION - for specific functions present in the repository
+  2. CLASS - for specific classes present in the repository
+  3. FILE - for entire file present in the repository for complete analysis or when function/class relevant are not known.
   4. OTHER - for any other data types or potential global variables or statements
 - Be specific in your requests.
 - Use the following format only for requesting code. 
@@ -46,23 +53,53 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
   6. Don't ask for code from your PREVIOUS REQUESTS that have already been found irrelevant.
   7. Don't use any extra words in the request lines.
 
-## PREVIOUS REQUESTS:
-{analysis_log}
+- For solving, analyze the issue and all the relevant code fetched from the repository
+  and provide a complete step by step breakdown of the issue below and what needs to be changed to fix it.
+ROOT CAUSE ANALYSIS:
+<analysis here>
 
-- For solving, analyze the issue and relevant code and generate the correct SOLUTION as unified diff to fix the issue.
-- Ensure that your fix will solve the original Issue and pass any potential test cases.
+Now, respond with either your NEED_CONTEXT requests that are new and not in PREVIOUS REQUESTS or your detailed ROOT CAUSE ANALYSIS and how to fix it.
+{iteration_check_statement}
+"""
+
+SOLVE_PROMPT = """You're a senior software engineer, debugging a given GitHub issue in a repository.
+Look at the issue, the relevant code for the issue fetched from the repository and your detailed analysis 
+of the issue and how to fix it and generate code for a git patch file to fix it.
+
+## Issue:
+{issue_description}
+
+## Relevant Code::
+{context_str}
+
+Given below is your detailed root cause analysis of the issue and how to fix it:
+{analysis}
+
+- For solving, look at the issue and relevant code and follow your detailed analysis to generate the fix.
+- Ensure that your fix will solve the original issue and pass all potential test cases.
 - Ensure proper indentation while generating the solution.
+- Check the provided relevant code and code base structure along with your analysis for determining what files need to be edited.
 - Generate your solution as a single git patch file including all your file edits in the given format -
 SOLUTION:
 ```diff
 <code here>
-```
-  
-"""
+```"""
 
 
 CONTEXT_TEMPLATE = """
 #### Name: {name}
+**File Path**: {file_path}
+
+```python
+{content}
+```
+
+Requested at iteration {iteration}
+"""
+
+CANDIDATE_CONTEXT_TEMPLATE = """
+#### Name: {name}
+**Reason behind requesting code:** {reason}
 **File Path**: {file_path}
 
 ```python
@@ -86,10 +123,9 @@ Evaluate the candidate code given below to check if it's relevant to the issue a
 information to already fetched code to solve the issue.
 
 ### Candidate Code:
-**Reason behind requesting code:** {reason}
 {candidate_context_str}
 
-Respond in the following format:
+Think about the reason you requested the code and respond whether it's relevant or not in the following format:
 IS_RELEVANT: Yes/No
 
 If and only if the code contains more than a single class or function and there are irrelevant parts in it,
@@ -113,7 +149,7 @@ required to debug the issue and the solution you generated for it.
 ## Relevant Code:
 {code_context}
 
-## Solution:
+## Solution that you have generated:
 {solution}
 
 Now, looking at the solution, return the list of files that you need to edit to fix the issue.

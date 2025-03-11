@@ -11,7 +11,7 @@ parser = Parser(PY_LANGUAGE)
 
 def extract_codebase_context(codebase_path: str, max_files: Optional[int] = None) -> Dict[str, Any]:
     context = {
-        "modules": [],
+        "modules": {},
         "classes": {},
         "functions": {},
         "imports": {},
@@ -78,7 +78,7 @@ def extract_codebase_context(codebase_path: str, max_files: Optional[int] = None
         python_files = python_files[:max_files]
     
     for file_path in python_files:
-        if 'tests/' in file_path:
+        if 'tests/' in file_path or file_path.endswith('__init__.py'):
             continue
         rel_path = os.path.relpath(file_path, codebase_path)
         module_name = rel_path.replace('/', '.').replace('\\', '.').replace('.py', '')
@@ -100,12 +100,16 @@ def extract_codebase_context(codebase_path: str, max_files: Optional[int] = None
 
             for match in function_query.matches(root_node):
                 function_info = extract_function_info(match, code)
+                if not function_info:
+                    continue
                 function_info["file_path"] = rel_path
                 file_info["functions"].append(function_info["name"])
                 context["functions"][f"{module_name}.{function_info['name']}"] = function_info
 
             for match in class_query.matches(root_node):
                 class_info = extract_class_info(match, code)
+                if not class_info:
+                    continue
                 class_info["file_path"] = rel_path
                 file_info["classes"].append(class_info["name"])
                 context["classes"][f"{module_name}.{class_info['name']}"] = class_info
@@ -131,12 +135,14 @@ def extract_codebase_context(codebase_path: str, max_files: Optional[int] = None
             #         #     if imp.split('.')[0] not in context["dependencies"]:
             #         #         context["dependencies"].append(imp.split('.')[0])
             
-            context["modules"].append(file_info)
             context["file_structure"][rel_path] = file_info
+
             
             if file_info["docstring"]:
                 context["documentation"][module_name] = file_info["docstring"]
     
+    context["modules"] = {val['module_name']: key for key, val in context['file_structure'].items()}
+
     return context
 
 def extract_module_docstring(node, code):
@@ -157,6 +163,8 @@ def extract_function_info(match, code):
     start_row , start_col= function_name_node[0].start_point
     end_row, end_col = function_name_node[0].end_point
     function_name = code[start_row:end_row+1][0][start_col:end_col]
+    if function_name in ['__init__', '__repr__', '__call__', '__new__']:
+        return None
 
     params_end_row= params_node[0].end_point.row
     function_sig = code[start_row:params_end_row+1]
@@ -287,11 +295,21 @@ def query_context(query, type, context, codebase_path, include_line_numbers = Tr
         keys = list(context['classes'].keys())
         matched_key = closest_match(query, keys)
         code = context['classes'][matched_key].copy()
+    elif type == "module":
+        if query in context["modules"]:
+            file_path = context["modules"][query]
+            matched_key = query
+            code = get_file_content(codebase_path, file_path)
+        else:
+            keys = list(context['modules'].keys())
+            matched_key = closest_match(query, keys)
+            file_path = context["modules"][matched_key]
+            code = get_file_content(codebase_path, file_path)
     else:
-        for module in context["modules"]:
-            if module["path"].endswith(query) or query in module["path"]:
-                matched_key = module["path"]
-                code = get_file_content(codebase_path, module["path"])
+        for path in context["file_structure"]:
+            if query in path:
+                matched_key = path
+                code = get_file_content(codebase_path, path)
             
     
     if matched_key:
@@ -313,6 +331,8 @@ def query_context(query, type, context, codebase_path, include_line_numbers = Tr
             return matched_key, code_str
             
 
-# context = analyze_codebase('swe_bench_cache/repos/astropy/astropy/astropy/modeling')
+context = analyze_codebase('swe_bench_cache/repos/sympy/sympy')
+with open('context.json', 'w') as f:
+    json.dump(context, f)
 # print(query_context('_separable', 'function', context, 'blah'))
 # generate_repo_structure('swe_bench_cache/repos/django/django')

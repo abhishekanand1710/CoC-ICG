@@ -7,11 +7,12 @@ def extract_patch_from_markdown(text):
     return match.group(1).rstrip() if match else None
 
 def parse_analysis_response(response):
-    if 'NEED_CONTEXT' in response:
+    if 'NEED_CONTEXT' in response or 'NEED_MODULE' in response:
         response_lines = response.split('\n')
         req_functions = []
         req_classes = []
         req_files = []
+        req_modules = []
         others = {}
 
         for line in response_lines:
@@ -33,13 +34,18 @@ def parse_analysis_response(response):
                         req = line.strip().split(' ')[-1].split('@')
                         req = [v.strip() for v in req]
                         others[req[0]] = (req[1], reason)
+                elif 'NEED_MODULE' in line:
+                    line, reason = line.split('|', 1)
+                    module_name = line.split(':')[-1].strip()
+                    req_modules.append((module_name, reason))
             except: continue
 
         return True, {
             "functions": req_functions,
             "classes": req_classes,
             "files": req_files,
-            "others": others
+            "others": others,
+            "modules": req_modules
         }
     else:
         return False, response

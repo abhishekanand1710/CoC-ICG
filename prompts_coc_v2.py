@@ -12,6 +12,9 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
 ## Issue:
 {issue_description}
 
+## Codebase moduless:
+{modules}
+
 ## Current Context (Iteration {cur_iteration}):
 {context_str}
 
@@ -40,15 +43,19 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
   NEED_CONTEXT: FILE = <full_file_path> | Reason: <why is this required?>
   NEED_CONTEXT: CLASS = <class_name> | Reason: <why is this required?>
   NEED_CONTEXT: OTHER = <entity_type>@<file_path> | Reason: <why is this required?>
-
+- If you are not sure about the exact entities that may contain the issue - Request 5 modules from the module list 
+  to identify files that may contain the issue.
+- Make your request in the following format - 
+  NEED_MODULE: <exact module name from modules list> | Reason: <why this module is required?>
   Rules:
   1. Always use @<file_path> for OTHER type and don't use it for other types.
   2. One request per line.
   3. Only request FILE when you have the exact path or don't request without the file path.
-  4. Maximum 3 context requests per analysis phase.
+  4. Maximum 3 context requests or 5 module requests per analysis phase.
   5. Think carefully about what you want to request to solve the issue.
   6. Don't ask for code from your PREVIOUS REQUESTS that have already been found irrelevant.
   7. Don't use any extra words in the request lines.
+  8. Each module request should also begin in a new line and use the exact module name.
 
 - For solving, analyze the issue and all the relevant code fetched from the repository
   and provide a complete step by step breakdown of the issue below and what needs to be changed to fix it.

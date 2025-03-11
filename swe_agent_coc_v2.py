@@ -174,6 +174,7 @@ Carefully analyze the issue, available code information and the codebase structu
     result = chain.invoke({
         "issue_description": state["issue"],
         # "repo_structure": state["repo_structure"],
+        "modules": '\n'.join(codebase_index['modules'].keys()),
         "cur_iteration": state["iterations"],
         "context_str": context_str,
         "analysis_log": analysis_log,
@@ -200,6 +201,7 @@ def retrieve(state: GraphState):
     functions = requested_context["functions"]
     classes = requested_context["classes"]
     files = requested_context["files"]
+    modules = requested_context["modules"]
     others = requested_context["others"]
 
     analysis_log = state["analysis_log"]
@@ -262,6 +264,24 @@ def retrieve(state: GraphState):
             "reason": reason
         }
         analysis_log[key] = f"NEED_CONTEXT: FILE = {key}"
+
+    for key, reason in modules:
+        if key in retrieved_keys:
+            continue
+        retrieved_keys.add(key)
+
+        fetched_context = query_context(key, "module", codebase_index, state["repo_path"])
+        if not fetched_context:
+            continue
+        file_path, data = fetched_context
+        retrieved[key] = {
+            "name": key,
+            "file_path": file_path,
+            "content": data,
+            "retrieved_at": state["iterations"],
+            "reason": reason
+        }
+        analysis_log[key] = f"NEED_MODULE: {key}"
 
     for entity, file in others.items():
         key, reason = file

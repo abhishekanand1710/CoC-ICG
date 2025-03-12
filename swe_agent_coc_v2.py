@@ -38,8 +38,10 @@ class GraphState(TypedDict):
     candidate_context: Dict
     requested_context: Dict
     analysis: Optional[str]
+
     solution: Optional[str]
     analysis_log: Dict
+    test_cases: List[str]
     repo_path: str
     patch_files: List[str]
     file_edits: Dict
@@ -106,6 +108,16 @@ def format_context_chain(context_chain: List[Dict]):
         if not name.endswith('.py'):
             name = name.split(".")[-1]
 
+        # if "additional_content" in context:
+        #     context = CONTEXT_TEMPLATE_EXTN.format(
+        #         name = name,
+        #         file_path = context["file_path"],
+        #         content = content,
+        #         iteration = context["retrieved_at"],
+        #         additional_content = context["additional_content"]
+        #     )
+        #     context_str += context
+        # else:
         context = CONTEXT_TEMPLATE.format(
             name = name,
             file_path = context["file_path"],
@@ -152,6 +164,7 @@ def initialize(state: GraphState):
         "analysis": None,
         "solution": None,
         "analysis_log": {},
+        "test_cases": [],
         "repo_path": state["repo_path"],
         "patch_files": List[str],
         "file_edits": {}
@@ -162,7 +175,7 @@ def analyze(state: GraphState):
     if not context_str:
         context_str = "No context fetched yet."
 
-    agent_prompt = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
+    agent_prompt = ChatPromptTemplate.from_template(ANALYSIS_PROMPT_V2)
     chain = agent_prompt | llm
 
     iteration_check_statement = ""
@@ -171,6 +184,11 @@ def analyze(state: GraphState):
 Carefully analyze the issue, available code information and the codebase structure to debug the issue and provide the solution in the required format."""
 
     analysis_log = '\n'.join(state["analysis_log"].values()) if state["analysis_log"] else "There are no previous requests at this point."
+
+    previous_analysis = "This is the first analysis."
+    if state["analysis"]:
+        previous_analysis = state["analysis"]
+
     result = chain.invoke({
         "issue_description": state["issue"],
         # "repo_structure": state["repo_structure"],
@@ -178,6 +196,7 @@ Carefully analyze the issue, available code information and the codebase structu
         "cur_iteration": state["iterations"],
         "context_str": context_str,
         "analysis_log": analysis_log,
+        "previous_analysis": previous_analysis,
         "iteration_check_statement": iteration_check_statement
     })
     
@@ -187,13 +206,160 @@ Carefully analyze the issue, available code information and the codebase structu
     if req_context:
         return {
             "iterations": state["iterations"] + 1,
-            "requested_context": parsed_response
+            "requested_context": parsed_response,
+            "analysis": response
         }
     else:
         return {
             "iterations": state["iterations"] + 1,
             "analysis": parsed_response
         }
+
+def retrieve_cumulative(state: GraphState):
+    retrieved = {}
+    requested_context = state["requested_context"]
+    functions = requested_context["functions"]
+    classes = requested_context["classes"]
+    files = requested_context["files"]
+    modules = requested_context["modules"]
+    others = requested_context["others"]
+
+    queries = []
+    reasons = {}
+    for f in functions: 
+        queries.append({'query': f[0], 'type': 'function'})
+        reasons[f[0]] = f[1]
+    for c in classes: 
+        queries.append({'query': c[0], 'type': 'class'})
+        reasons[c[0]] = c[1]
+    for f in files: 
+        queries.append({'query': f[0], 'type': 'file'})
+        reasons[f[0]] = f[1]
+    for m in modules: 
+        queries.append({'query': m[0], 'type': 'module'})
+        reasons[m[0]] = m[1]
+    for key, o in others.items(): 
+        query = f'{key}@{o[0]}'
+        queries.append({'query': query, 'type': 'other'})
+        reasons[query] = o[1]
+
+    retrieved_data = query_cumulative(queries, codebase_index, state["repo_path"])
+
+    retrieved_keys = state["retrieved_keys"]
+    analysis_log = state["analysis_log"]
+
+    for func in functions:
+        key, reason = func
+        if key in retrieved_keys:
+            if key in retrieved_data:
+                del retrieved_data[key]
+            continue
+
+        retrieved_keys.add(key)
+        if key not in retrieved_data:
+            continue
+        name, data = retrieved_data[key]
+        retrieved[key] = {
+            "name": name,
+            "file_path": data["file_path"],
+            "content": data["definition"],
+            "retrieved_at": state["iterations"],
+            "reason": reason
+        }
+        analysis_log[key] = f"NEED_CONTEXT: FUNCTION = {key}"
+    for cls_ in classes:
+        key, reason = cls_
+        if key in retrieved_keys:
+            if key in retrieved_data:
+                del retrieved_data[key]
+            continue
+
+        retrieved_keys.add(key)
+        if key not in retrieved_data:
+            continue
+        name, data = retrieved_data[key]
+        retrieved[key] = {
+            "name": name,
+            "file_path": data["file_path"],
+            "content": data["definition"],
+            "retrieved_at": state["iterations"],
+            "reason": reason
+        }
+        analysis_log[key] = f"NEED_CONTEXT: CLASS = {key}"
+
+    for file in files:
+        key, reason = file
+        if key in retrieved_keys:
+            if key in retrieved_data:
+                del retrieved_data[key]
+            continue
+
+        retrieved_keys.add(key)
+        if key not in retrieved_data:
+            continue
+        file_path, data = retrieved_data[key]
+        # additional_content = get_classes_functions_for_file(file_path, codebase_index)
+        retrieved[key] = {
+            "name": file_path.split("/")[-1],
+            "file_path": file_path,
+            "content": data,
+            "retrieved_at": state["iterations"],
+            "reason": reason,
+            # "additional_content": additional_content
+        }
+        analysis_log[key] = f"NEED_CONTEXT: FILE = {key}"
+
+    for key, reason in modules:
+        if key in retrieved_keys:
+            if key in retrieved_data:
+                del retrieved_data[key]
+            continue
+
+        retrieved_keys.add(key)
+        if key not in retrieved_data:
+            continue
+        file_path, data = retrieved_data[key]
+        # additional_content = get_classes_functions_for_file(file_path, codebase_index)
+        retrieved[key] = {
+            "name": key,
+            "file_path": file_path,
+            "content": data,
+            "retrieved_at": state["iterations"],
+            "reason": reason,
+            # "additional_content": additional_content
+        }
+        analysis_log[key] = f"NEED_MODULE: {key}"
+
+    for entity, file in others.items():
+        key, reason = file
+        if key in retrieved_keys:
+            if key in retrieved_data:
+                del retrieved_data[key]
+            continue
+
+        retrieved_keys.add(key)
+        if key not in retrieved_data:
+            continue
+        file_path, data = retrieved_data[key]
+        # additional_content = get_classes_functions_for_file(file_path, codebase_index)
+        retrieved[f"{entity}@{key}"] = {
+            "name": f"{entity}@{key}",
+            "file_path": file_path,
+            "content": data,
+            "retrieved_at": state["iterations"],
+            "reason": reason,
+            # "additional_content": additional_content
+        }
+        analysis_log[f"{entity}@{key}"] = f"NEED_CONTEXT: OTHER = {entity}@{key}"
+    
+    return {
+        "context_chain": state["context_chain"],
+        "candidate_context": retrieved,
+        "requested_context": [],
+        "analysis_log": analysis_log,
+        "iterations": state["iterations"] + 1,
+        "retrieved_keys": retrieved_keys
+    }
 
 def retrieve(state: GraphState):
     retrieved = {}
@@ -324,7 +490,7 @@ def filter_context(state: GraphState):
         for query, context in candidate_context.items():
             candidate_context_str = format_candidate_context(context, context["reason"].strip().removesuffix("Reason:").strip())
 
-            agent_prompt = ChatPromptTemplate.from_template(FILTER_PROMPT)
+            agent_prompt = ChatPromptTemplate.from_template(FILTER_PROMPT_V2)
             chain = agent_prompt | llm
             result = chain.invoke({
                 "issue_description": state["issue"],
@@ -348,6 +514,41 @@ def filter_context(state: GraphState):
     return {
         "context_chain": context_chain,
         "analysis_log": analysis_log,
+        "iterations": state["iterations"] + 1
+    }
+
+def generate_test(state: GraphState):
+    analysis = state["analysis"]
+    context_str = format_context_chain(state["context_chain"])
+    agent_prompt = ChatPromptTemplate.from_template(TEST_PROMPT)
+    chain = agent_prompt | llm
+    result = chain.invoke({
+        "issue_description": state["issue"],
+        "context_str": context_str,
+        "analysis": analysis
+    })
+    response = result.content
+    test_cases = parse_test_response(response)
+
+    return {
+        "test_cases": test_cases,
+        "iterations": state["iterations"] + 1
+    }
+
+def solve_with_tests(state: GraphState):
+    analysis = state["analysis"]
+    context_str = format_context_chain(state["context_chain"])
+    agent_prompt = ChatPromptTemplate.from_template(SOLVE_PROMPT_WITH_TESTS)
+    chain = agent_prompt | llm
+    result = chain.invoke({
+        "issue_description": state["issue"],
+        "context_str": context_str,
+        "analysis": analysis,
+        "test_cases": "TEST CASE: \n".join(state["test_cases"])
+    })
+    response = result.content
+    return {
+        "solution": response,
         "iterations": state["iterations"] + 1
     }
 
@@ -422,12 +623,19 @@ def create_agent_graph():
  
     workflow.add_node("init", initialize)
     workflow.add_node("analyze", analyze)
-    workflow.add_node("retrieve", retrieve)
+    workflow.add_node("retrieve", retrieve_cumulative)
     workflow.add_node("filter", filter_context)
+    # workflow.add_node("generate_test", generate_test)
     workflow.add_node("solve", solve)
     workflow.add_node("localize", localize)
     workflow.add_node("generate_patch", generate_patch)
     workflow.add_node("save", lambda s: s)
+
+    # workflow.add_conditional_edges(
+    #     "analyze",
+    #     lambda s: "retrieve" if len(s["requested_context"]) > 0 else "generate_test",
+    #     {"retrieve": "retrieve", "generate_test": "generate_test"}
+    # )
 
     workflow.add_conditional_edges(
         "analyze",
@@ -438,6 +646,7 @@ def create_agent_graph():
     workflow.add_edge("init", "analyze")
     workflow.add_edge("retrieve", "filter")
     workflow.add_edge("filter", "analyze")
+    # workflow.add_edge("generate_test", "solve")
     workflow.add_edge("solve", "localize")
     workflow.add_edge("localize", "generate_patch")
     workflow.add_edge("generate_patch", "save")
@@ -492,6 +701,8 @@ def main(args):
                     "model_patch": result_patch,
                     "model_name_or_path": args.model
                 }
+                # print(result_patch)
+                # break
                 preds.append(output)
             except Exception:
                 traceback.print_exc()

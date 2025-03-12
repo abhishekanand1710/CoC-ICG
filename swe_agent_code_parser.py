@@ -266,9 +266,11 @@ def generate_repo_structure(root_path, indent="\t", max_depth=None):
     structure = "\n".join(result)
     return structure
 
-def closest_match(target, string_list):
+def closest_match(target, string_list, is_file=False):
     original_strings = string_list.copy()
-    processed_strings = [s.split('.')[-1] for s in string_list]
+    processed_strings = string_list
+    if not is_file:
+        processed_strings = [s.split('.')[-1] for s in string_list]
     closest = difflib.get_close_matches(target, processed_strings, n=1, cutoff=0)[0]
     match_idx = processed_strings.index(closest)
     return original_strings[match_idx]
@@ -284,8 +286,58 @@ def analyze_codebase(codebase_path, output_path='file_structure.json', max_files
     #         json.dump(context['file_structure'], f, indent=2)
     
     return context
+
+def query_min(query, type, context, codebase_path):
+    matched_key, code, data = None, None, None
+    if type == "function":
+        keys = list(context['functions'].keys())
+        matched_key = closest_match(query, keys)
+        code = context['functions'][matched_key].copy()
+    elif type == "class":
+        keys = list(context['classes'].keys())
+        matched_key = closest_match(query, keys)
+        code = context['classes'][matched_key].copy()
+    elif type == "module":
+        if query in context["modules"]:
+            file_path = context["modules"][query]
+            matched_key = file_path
+            data = context["file_structure"][file_path].copy()
+            code = get_file_content(codebase_path, file_path)
+        else:
+            keys = list(context['modules'].keys())
+            matched_key = closest_match(query, keys)
+            file_path = context["modules"][matched_key]
+            matched_key = file_path
+            data = context["file_structure"][file_path].copy()
+            code = get_file_content(codebase_path, file_path)
+    else:
+        keys = list(context['file_structure'].keys())
+        matched_key = closest_match(query, keys, is_file=True)
+        file_path = matched_key
+        data = context["file_structure"][file_path].copy()
+        code = get_file_content(codebase_path, file_path)
+
+    if matched_key:
+        if isinstance(code, Dict):
+            code_lines = code['definition'].split('\n')
+            if 'line_range' in code:
+                line_range = code['line_range']
+                for i in range(len(code_lines)):
+                    code_lines[i] = f"{line_range[0]+i}\t{code_lines[i]}"
+            code_str = '\n'.join(code_lines)
+            code['definition'] = code_str
+            return matched_key, code, data
+        elif isinstance(code, str):
+            code_lines = code.split('\n')
+            line_range = (1, len(code_lines))
+            for i in range(len(code_lines)):
+                code_lines[i] = f"{line_range[0]+i}\t{code_lines[i]}"
+            code_str = '\n'.join(code_lines)
+            return matched_key, code_str, data
+
+    return matched_key, code, data
     
-def query_context(query, type, context, codebase_path, include_line_numbers = True):
+def query_context(query, type, context, codebase_path):
     matched_key, code = None, None
     if type == "function":
         keys = list(context['functions'].keys())
@@ -329,10 +381,62 @@ def query_context(query, type, context, codebase_path, include_line_numbers = Tr
                 code_lines[i] = f"{line_range[0]+i}\t{code_lines[i]}"
             code_str = '\n'.join(code_lines)
             return matched_key, code_str
+        
+def query_cumulative(queries, context, codebase_path):
+
+    retrieved_data = {}
+
+    results = {'file': {}, 'function': {}, 'class': {}}
+    file_queries = [q['query'] for q in queries if q['type'] == 'file']
+    module_queries = [q['query'] for q in queries if q['type'] == 'module']
+    other_queries = [q['query'].split('@')[-1].strip() for q in queries if q['type'] == 'other' and '@' in q['query']]
+
+    file_queries += other_queries
+    
+    for file_query in file_queries:
+        file_match, code, file_data = query_min(file_query, 'file', context, codebase_path)
+        if not file_match:
+            continue
+        results['file'][file_match] = (file_query, file_data)
+        retrieved_data[file_query] = (file_match, code)
+
+    for module_query in module_queries:
+        file_match, code, file_data = query_min(module_query, 'module', context, codebase_path)
+        if not file_match:
+            continue
+        results['file'][file_match] = (module_query, file_data)
+        retrieved_data[module_query] = (file_match, code)
+
+    for q in queries:
+        if q['type'] in ['function', 'class']:
+            matched_key, code, _ = query_min(q['query'], q['type'], context, codebase_path)
+            if matched_key:
+                if results['file']:
+                    key = matched_key.split('.')[-1]
+                    for file_data in results['file'].values():
+                        if key not in file_data[1]['functions'] and key not in file_data[1]['classes']:
+                            retrieved_data[q['query']] = (matched_key, code)
+                else:
+                    retrieved_data[q['query']] = (matched_key, code)
+
+    return retrieved_data
+
+def get_classes_functions_for_file(file_path, context):
+    functions = context["file_structure"][file_path]["functions"]
+    classes = context["file_structure"][file_path]["classes"]
+
+    result = ""
+    if functions:
+        result += "**Functions in file**: \n" + "\n".join(functions)
+    if classes:
+        result += "\n\n**Classes in file**: \n" + "\n".join(classes)
+
+    return result
             
 
-context = analyze_codebase('swe_bench_cache/repos/sympy/sympy')
-with open('context.json', 'w') as f:
-    json.dump(context, f)
+context = analyze_codebase('swe_bench_cache/repos/astropy/astropy')
+# print(query_cumulative([{'type': 'other', 'query': '_operators@astropy/modeling/separable.py'}], context, 'swe_bench_cache/repos/astropy/astropy'))
+# with open('context.json', 'w') as f:
+#     json.dump(context, f)
 # print(query_context('_separable', 'function', context, 'blah'))
 # generate_repo_structure('swe_bench_cache/repos/django/django')

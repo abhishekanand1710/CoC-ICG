@@ -90,6 +90,15 @@ def parse_filter_response(response):
     
     return is_relevant, None
 
+def parse_test_response(response):
+    pattern = r'TEST CASE:\s*```python\n(.*?)```'
+    matches = re.finditer(pattern, response, re.DOTALL)
+    test_cases = []
+    for match in matches:
+        code = match.group(1)
+        test_cases.append(code)
+    return test_cases
+
 def parse_file_edit_response(response):
     pattern = r'EDIT CODE (\d+),(\d+):\s*```python\n(.*?)```'
     matches = re.finditer(pattern, response, re.DOTALL)

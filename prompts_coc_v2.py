@@ -2,12 +2,11 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
 
 1. Analyze the problem statement
 2. Analyze the code that is already provided line by line and try to debug the issue.
-3. Localize the issue at and determine how to fix it. Finally provide the code for the fix.
-4. Proceed to solve it only when you are sure of the bug is present in the available context.
-5. If the issue can't be debugged with the given code context, request SPECIFIC code elements using EXACT entity names or paths from the codebase.
+3. Localize the issue at and determine the complete root cause.
+4. If the issue can't be debugged with the given code context, request SPECIFIC code elements using EXACT entity names or paths from the codebase.
   For eg - a particular function definition, class definition, variables, files or any other Pyhton entities.
-6. Iteratively narrow down based on context.
-7. Provide final step by step analysis of the issue based on the issue description and the code from the repository.
+5. Iteratively narrow down based on context.
+6. Provide final step by step analysis of the issue based on the issue description and code from the repository.
 
 ## Issue:
 {issue_description}
@@ -22,11 +21,11 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
 {analysis_log}
 
 ## Guidelines:
-- FIRST try to solve with existing context looking at each code line carefully.
-- Check existing code and analyze what additional information is required to debug the issue and solve it.
+- Check existing code line by line to debug the issue.
+- Analyze what additional information is required to debug the issue and find its root cause.
 - First find the required information in the code provided and use it.
 - If the additional information required is not present then request for it.
-- Always try to find complete information required to fix the issue.
+- Always try to find all the information required to fix the issue without making assumptions.
 - For requesting additional code, look at the issue and the provided code and think
   what extra information you need for finding the root cause of the issue.
 - Differentiate between what are user's code entities given in the issue and what are repository entities.
@@ -58,41 +57,179 @@ ANALYSIS_PROMPT = """You're a senior software engineer, debugging a given GitHub
   8. Each module request should also begin in a new line and use the exact module name.
 
 - For solving, analyze the issue and all the relevant code fetched from the repository
-  and provide a complete step by step breakdown of the issue below and what needs to be changed to fix it.
+  and provide a complete step by step breakdown of the issue below.
 ROOT CAUSE ANALYSIS:
 <analysis here>
 
-Now, respond with either your NEED_CONTEXT requests that are new and not in PREVIOUS REQUESTS or your detailed ROOT CAUSE ANALYSIS and how to fix it.
+Now, respond with either your NEED_CONTEXT requests that are new and not in PREVIOUS REQUESTS or your detailed ROOT CAUSE ANALYSIS.
 {iteration_check_statement}
 """
 
-SOLVE_PROMPT = """You're a senior software engineer, debugging a given GitHub issue in a repository.
-Look at the issue, the relevant code for the issue fetched from the repository and your detailed analysis 
-of the issue and how to fix it and generate code for a git patch file to fix it.
 
-## Issue:
+ANALYSIS_PROMPT_V2 = """As a senior engineer, debug this GitHub issue. Follow steps:
+1. Analyze problem statement
+2. Line-by-line code review
+3. Try to identify root cause location
+4. If insufficient information, request SPECIFIC code functions/classes/files/variables using exact names/paths that are not present
+5. Iteratively localize the issue by requesting unavailable code defiitions without repeating requests
+6. Finally after gathering all context, output step-by-step root cause analysis analysis to find the EXACT bug and location.
+7. Determine exact line/lines where the bug is and needs to be fixed
+
+**Code Modules**: 
+{modules}
+
+**Rules**:
+- Exhaust existing code before requesting new info
+- Request missing critical entities (no functions/classes/files that are already present in the context)
+- Request every possible entitiy or file related to the issue that are not available
+- Differentiate between user's code entities in the issue and repository entities
+- Only request entities that maybe present in the repository
+- Entity types:
+  1. FUNCTION: <name>
+  2. CLASS: <name> 
+  3. FILE: <full_path>
+  4. OTHER: <type>@<file_path>
+- Module requests: If uncertain about exact entities, request modules potentially containing them
+- Format requests strictly as:
+  NEED_CONTEXT: FUNCTION = <function_name> | Reason: <why is this required?>
+  NEED_CONTEXT: FILE = <full_file_path> | Reason: <why is this required?>
+  NEED_CONTEXT: CLASS = <class_name> | Reason: <why is this required?>
+  NEED_CONTEXT: OTHER = <entity_type>@<file_path> | Reason: <why is this required?>
+  NEED_MODULE: <exact_module_name> | Reason: <justification>
+- Max 3 context/5 module requests per iteration
+- Each request in new line
+- If context gaps remain → MUST request first
+- Always request with correct entity types, if not sure use OTHER
+- Always use @<file_path> for OTHER type and don't use it for other types
+- No partial solutions allowed and only provide necessary changes
+
+## Issue: 
 {issue_description}
 
-## Relevant Code::
+## Your previous analysis and all the code you requested:
+
+**Your previous analysis**:
+{previous_analysis}
+
+**Your requested code**: 
 {context_str}
 
-Given below is your detailed root cause analysis of the issue and how to fix it:
+
+**Output either**:
+new context/module requests that have not been analyzed in the following format:
+
+Line-by-line analysis of relevant code:
+<analysis>
+
+NEW REQUESTS:
+<requests>
+
+**OR** when all relevant code is fetched for debugging, output
+
+ROOT CAUSE ANALYSIS:
+<step-by-step breakdown>
+
+{iteration_check_statement}"""
+
+
+TEST_PROMPT = """As a senior engineer, who is debugging this GitHub issue, write test cases for issue verification. Follow these steps:
+1. Analyze issue
+2. Line-by-line code review of provided code
+3. Line-by-line review of root cause analysis
+4. Generate test cases for issue fix verification
+
+**Issue**:
+{issue_description}
+
+**Code Context**:
+{context_str}
+
+**Root Cause Analysis**:
 {analysis}
 
-- For solving, look at the issue and relevant code and follow your detailed analysis to generate the fix.
-- Ensure that your fix will solve the original issue and pass all potential test cases.
-- Ensure proper indentation while generating the solution.
-- Check the provided relevant code and code base structure along with your analysis for determining what files need to be edited.
+**Requirements**: 
+1. Generate reproduction test cases matching root cause  
+2. Create validation tests for potential fixes  
+3. Multiple test cases allowed
+- Return your test cases in the following format:
+TEST CASE:
+```python
+<code here>
+```
+"""
+
+SOLVE_PROMPT_WITH_TESTS = """As a senior engineer write the fix for the Github issue. Follow steps:
+1. Analyze issue
+2. Line-by-line code review of provided code
+3. Line-by-line review of root cause analysis
+4. Line-by-line review of test cases.
+5. Generate code fix for the issue.
+
+**Issue**:
+{issue_description}
+
+**Code Context**:
+{context_str}
+
+**Root Cause Analysis**:
+{analysis}
+
+**Test Cases**:
+{test_cases}
+
+## Guidelines:
+- Apply root cause analysis from above
+- Ensure fix addresses all test cases
+- Maintain code style/indentation
+- Edit minimal required files
 - Generate your solution as a single git patch file including all your file edits in the given format -
 SOLUTION:
 ```diff
 <code here>
 ```"""
 
+SOLVE_PROMPT= """As a senior engineer write the fix for the Github issue. Follow steps:
+1. Analyze issue
+2. Line-by-line code review of provided code
+3. Line-by-line review of root cause analysis
+4. Generate code fix for the issue.
+
+**Issue**:
+{issue_description}
+
+**Code Context**:
+{context_str}
+
+**Root Cause Analysis**:
+{analysis}
+
+## Guidelines:
+- Apply root cause analysis from above while generating the fix
+- Maintain code style/indentation
+- Edit minimal required files
+- Generate your solution as a single git patch file including all your file edits in the given format -
+SOLUTION:
+```diff
+<code here>
+```"""
 
 CONTEXT_TEMPLATE = """
 #### Name: {name}
 **File Path**: {file_path}
+
+```python
+{content}
+```
+
+Requested at iteration {iteration}
+"""
+
+CONTEXT_TEMPLATE_EXTN = """
+#### Name: {name}
+**File Path**: {file_path}
+
+**Functions and classes in file**:
+{additional_content}
 
 ```python
 {content}
@@ -117,7 +254,7 @@ Requested at iteration {iteration}
 FILTER_PROMPT = """You're a senior software engineer debugging a given GitHub issue in a repository.
 You are provided with the issue and also code context fetched from the repository that are relevant.
 
-## Current Issue:
+## Issue:
 {issue_description}
 
 ## Relevant Code:
@@ -137,6 +274,35 @@ then extract the part you originally requested along with any other relevant cod
 Include the line numbers for each code line you extract and respond in the following format - 
 IS_RELEVANT: Yes
 RELEAVANT_CODE:
+```python
+<code here>
+```
+"""
+
+FILTER_PROMPT_V2 = """As a senior engineer, you are debugging a given GitHub issue.
+You are provided with the issue and also existing code fetched from the repository that is relevant.
+You are assessing the relevance of a piece of candidate code to the issue.
+
+**Issue**: 
+{issue_description}
+
+**Existing Code**:
+{context_str}
+
+**Candidate Code**:
+{candidate_context_str}
+
+1. Verify if candidate code contains requested entities/patterns
+2. Look at the reason you requested the code.
+3. Line-by-line by code review of candidate code.
+4. Check value-added beyond existing code.
+5. If >1 class/function, extract all relevant lines with line numbers from the code.
+
+RULES:
+- Answer strictly in format:
+IS_RELEVANT: Yes/No
+(Only if Yes with extraction needed)
+RELEVANT_CODE:
 ```python
 <code here>
 ```
@@ -171,43 +337,40 @@ Example:
 FILE_REQUEST: src/model.py
 """
 
-PATCH_GENERATION_PROMPT = """You're a senior software engineer, debugging a given GitHub issue in a repository.
+PATCH_GENERATION_PROMPT = """As a senior engineer, fixing a GitHub issue, follow the steps:
+1. Analyze the issue
+2. Read the solutio line by line
 
-## Issue:
-{issue_description}
+**Issue:**  
+{issue_description}  
 
-Given below is the solution along with your reasoning behind it for the issue.
+**Solution:**  
+{solution}  
 
-## Solution:
-# {solution}
-
-## You want to edit the following files to fix the issue.
+**File to be edit for the soluton**:
 {patch_files}
 
-### Files you have already edited to apply your fix - 
+**Already edited:**
 {edited_patch_files}
 
-### You are currently editing file - `{current_file}`
+**Currently editing**: `{current_file}`
 
-## Editing phase
-Here's all the relevant code you have found in file `{current_file}` to fix the issue.
-
-### Relevant Code:
+**Relevant code in `{current_file}`**: 
 {cur_code_context}
 
-### Edit Guidelines:
-- Analyze your solution and relevant code from the file.
-- Generate the new code along with the exact line numbers with proper indentation that you want to replace the original lines with.
-- Only focus on the current file  - `{current_file}` and make necessary edits that are required in this file to fix the issue.
-- You can make edits in 1 or multuiple places in the file.
-- Return the complete range of lines that needs to edited and replaced or removed.
-- Don't return line numbers in the code. Just return the code.
-- Return your edits in the following format - 
+**Edit Guidelines:**  
+1. Analyze the solution and relevant code.  
+2. Generate new code (with proper indentation) to replace/remove/insert lines in `{current_file}`.  
+3. Focus only on necessary edits in this file (1+ locations).  
+4. Return complete line ranges (start-end) for each edit.  
+5. **Do NOT include line numbers in the code block.**  
+6. Return your edits in the following format - 
 EDIT CODE <start_line>,<end_line>:
 ```python
 <new code here with exact line numbers or empty for removing lines>
 ```
 
+**Examples**:
 Example for replacing a single line with one line:
 EDIT CODE 45,45:
 ```python

@@ -143,6 +143,7 @@ def generate_patch_file(file_edits, codebase_path):
         os.unlink(patch_file.name)
         return patch_content
     finally:
+        subprocess.run(['git', 'reset', '--hard', 'HEAD'], cwd=repo_path, stdout=subprocess.DEVNULL)
         os.chdir(orig_dir)
     
 

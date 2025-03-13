@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 DATASET_DIR = Path('./swe_bench_cache')
-DATASET_SAVE_FILE = Path(DATASET_DIR, 'dataset_dev.json')
+DATASET_SAVE_FILE = Path(DATASET_DIR, 'dataset.json')
 REPOS_DIR = Path(DATASET_DIR, 'repos')
 
 def save_dataset(dataset):
@@ -19,8 +19,8 @@ def load_swe_bench_dataset(dataset: str = 'princeton-nlp/SWE-bench_Lite'):
         with open(DATASET_SAVE_FILE.resolve(), 'r') as f:
             return json.load(f)
         
-    # data = load_dataset(dataset)['test']
-    data = load_dataset(dataset)['dev']
+    data = load_dataset(dataset)['test']
+    # data = load_dataset(dataset)['dev']
     
     instances = {}
     for instance in data:

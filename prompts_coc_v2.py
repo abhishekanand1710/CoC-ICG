@@ -114,6 +114,9 @@ ANALYSIS_PROMPT_V2 = """As a senior engineer, debug this GitHub issue. Follow st
 **Your requested code**: 
 {context_str}
 
+**Previous Requests**:
+{analysis_log}
+
 
 **Output either**:
 new context/module requests that have not been analyzed in the following format:
@@ -188,6 +191,33 @@ SOLUTION:
 <code here>
 ```"""
 
+SOLVE_AND_ANALYZE_PROMPT= """As a senior engineer write the fix for the Github issue. Follow steps:
+1. Analyze the issue clearly
+2. Line-by-line code review of all the provided code
+3. Line-by-line review of your analysis while fetching relevant code for the issue
+3. Generate ste-by-step root cause analysis of the issue to determine the exact location of the bug
+4. Generate code fix for the issue
+
+**Issue**:
+{issue_description}
+
+**Code Context**:
+{context_str}
+
+**Your previous analysis**:
+{analysis}
+
+## Guidelines:
+- Generate your new root cause analysis first to localize the issue
+- Apply your root cause analysis while generating fix for the issue
+- Maintain code style/indentation
+- Edit minimal required files
+- Generate your solution as a single git patch file including all your file edits in the given format -
+SOLUTION:
+```diff
+<code here>
+```"""
+
 SOLVE_PROMPT= """As a senior engineer write the fix for the Github issue. Follow steps:
 1. Analyze issue
 2. Line-by-line code review of provided code
@@ -214,7 +244,6 @@ SOLUTION:
 ```"""
 
 CONTEXT_TEMPLATE = """
-#### Name: {name}
 **File Path**: {file_path}
 
 ```python
@@ -225,7 +254,6 @@ Requested at iteration {iteration}
 """
 
 CONTEXT_TEMPLATE_EXTN = """
-#### Name: {name}
 **File Path**: {file_path}
 
 **Functions and classes in file**:

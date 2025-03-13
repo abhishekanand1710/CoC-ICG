@@ -23,6 +23,7 @@ import operator
 from swe_agent_code_parser import *
 
 llm = None
+llm_greedy = None
 vectorstore = None
 files_list = []
 codebase_index = None
@@ -38,7 +39,6 @@ class GraphState(TypedDict):
     candidate_context: Dict
     requested_context: Dict
     analysis: Optional[str]
-
     solution: Optional[str]
     analysis_log: Dict
     test_cases: List[str]
@@ -51,6 +51,14 @@ class GraphState(TypedDict):
 def init_backend(model):
     if model in ['o3-mini', 'gpt-4o-mini']:
         return ChatOpenAI(model=model)
+    else:
+        raise NotImplementedError(f"Support for {model} is not yet implemented.")
+    
+def init_backend_greedy(model):
+    if model in ['o3-mini', 'gpt-4o-mini']:
+        if model == 'o3-mini':
+            return ChatOpenAI(model=model)
+        return ChatOpenAI(model=model, temperature=0.1, top_p=0.1)
     else:
         raise NotImplementedError(f"Support for {model} is not yet implemented.")
 
@@ -555,8 +563,8 @@ def solve_with_tests(state: GraphState):
 def solve(state: GraphState):
     analysis = state["analysis"]
     context_str = format_context_chain(state["context_chain"])
-    agent_prompt = ChatPromptTemplate.from_template(SOLVE_PROMPT)
-    chain = agent_prompt | llm
+    agent_prompt = ChatPromptTemplate.from_template(SOLVE_AND_ANALYZE_PROMPT)
+    chain = agent_prompt | llm_greedy
     result = chain.invoke({
         "issue_description": state["issue"],
         "context_str": context_str,
@@ -738,5 +746,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     llm = init_backend(model=args.model)
+    llm_greedy = init_backend(model=args.model)
     main(args)
         

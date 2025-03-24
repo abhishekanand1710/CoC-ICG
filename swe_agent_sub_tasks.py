@@ -31,7 +31,7 @@ class GraphState(TypedDict):
     patch: Optional[str] = None
 
 def init_backend(model):
-    if model in ['gpt-4o-mini']:
+    if model in ['o3-mini', 'gpt-4o-mini', 'gpt-4o']:
         return ChatOpenAI(model=model)
     else:
         raise NotImplementedError(f"Support for {model} is not yet implemented.")

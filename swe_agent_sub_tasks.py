@@ -116,7 +116,7 @@ def build_workflow():
     return workflow.compile()
 
  
-def run_inference(instance, base_repo_dir):
+def run_inference(instance, base_repo_dir, run_id):
     splits = process_repo(instance, base_repo_dir)
 
     initial_state = GraphState(
@@ -127,7 +127,8 @@ def run_inference(instance, base_repo_dir):
     )
 
     app = build_workflow()
-    result = app.invoke(initial_state)
+    config = RunnableConfig(tags=[run_id])
+    result = app.invoke(initial_state, config)
     patch = extract_patch_from_markdown(result["patch"])
 
     return result["patch"], patch
@@ -167,7 +168,7 @@ def main(args):
     cur_responses = [value for _, value in responses.items()]
     try:
         for key, test_instance in tqdm(dataset.items()):
-            result, patch = run_inference(test_instance, args.dir)
+            result, patch = run_inference(test_instance, args.dir, run_id)
             output = {
                 "instance_id": key,
                 "model_patch": patch,

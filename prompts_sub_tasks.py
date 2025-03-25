@@ -92,7 +92,10 @@ files to fix the issue. Please respond with all the sub-tasks and the final patc
 shown above. The patch file should just focus on fixing the issue without generating any additional
 code for any tests or other things.
 
-Respond below:
+Respond below in the following format:
+```diff
+<your patch here>
+```
 """
 
 relevant_code_snippet_prompt = """

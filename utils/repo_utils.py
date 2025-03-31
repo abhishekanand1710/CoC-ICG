@@ -51,7 +51,7 @@ def find_non_utf_encoded_files_in_dir(dir):
     return invalid_files
 
 def init_vectorstore(instance_id, splits):
-    embeddings_path = f"swe_bench_cache/repo_embeddings/{instance_id}"
+    embeddings_path = f"swe_bench_verified_cache/repo_embeddings/{instance_id}"
     if os.path.exists(embeddings_path):
         vectorstore = FAISS.load_local(embeddings_path, 
                                        OpenAIEmbeddings(model="text-embedding-3-small"), 

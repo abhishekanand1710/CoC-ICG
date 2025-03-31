@@ -3,10 +3,11 @@ import json
 from datasets import load_dataset
 import git
 import json
+from tqdm import tqdm
 
 from pathlib import Path
 
-DATASET_DIR = Path('./swe_bench_cache')
+DATASET_DIR = Path('./swe_bench_verified_cache')
 DATASET_SAVE_FILE = Path(DATASET_DIR, 'dataset.json')
 REPOS_DIR = Path(DATASET_DIR, 'repos')
 
@@ -14,7 +15,7 @@ def save_dataset(dataset):
     with open(DATASET_SAVE_FILE.resolve(), 'w') as f:
         json.dump(dataset, f)
 
-def load_swe_bench_dataset(dataset: str = 'princeton-nlp/SWE-bench_Lite'):
+def load_swe_bench_dataset(dataset: str = 'princeton-nlp/SWE-bench_Verified'):
     if DATASET_SAVE_FILE.exists():
         with open(DATASET_SAVE_FILE.resolve(), 'r') as f:
             return json.load(f)
@@ -23,7 +24,7 @@ def load_swe_bench_dataset(dataset: str = 'princeton-nlp/SWE-bench_Lite'):
     # data = load_dataset(dataset)['dev']
     
     instances = {}
-    for instance in data:
+    for instance in tqdm(data):
         instance = {
             'repo': instance['repo'],
             'instance_id': instance['instance_id'],
@@ -74,11 +75,11 @@ def prepare_one_instance(instance):
     
 
 def process_instances(instances):
-    for instance_id, instance in instances.items():
+    for instance_id, instance in tqdm(instances.items()):
         prepare_one_instance(instance)
 
 def main():
-    os.makedirs('./swe_bench_cache', exist_ok=True)
+    os.makedirs('./swe_bench_verified_cache', exist_ok=True)
     dataset = load_swe_bench_dataset()
     process_instances(dataset)
 

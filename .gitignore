@@ -8,3 +8,4 @@ scrap.py
 set_envs.sh
 .vscode
 vendor
+swe_bench_verified_cache

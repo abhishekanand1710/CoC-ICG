@@ -109,36 +109,3 @@ def parse_file_edit_response(response):
         code = match.group(3)
         code_edit_snippets.append((start_line, end_line, code))
     return code_edit_snippets
-
-
-# def parse_llm_response_old(response):
-#     context_requests = []
-#     solution = None
-    
-#     context_match = re.search(r'NEED_CONTEXT\[(.*?)\]', response, re.DOTALL)
-#     if context_match:
-#         requests = [r.strip().strip('"') 
-#                    for r in context_match.group(1).split(',') 
-#                    if r.strip()]
-#         context_requests = validate_requests(requests)
-    
-#     solution_match = re.search(r'SOLUTION\[(.*?)\]', response, re.DOTALL)
-#     if solution_match:
-#         solution = solution_match.group(1).strip()
-#     print(context_requests, solution)
-#     return context_requests, solution
-
-# def validate_requests(requests):
-#     valid = []
-#     pattern = re.compile(
-#         r'^(\w+/)*[\w\.]+(\.\w+)?'  # Path
-#         r'(::\w+)?'                 # Function/class
-#         r'|:\d+-\d+$'               # Line range
-#     )
-    
-#     for req in requests:
-#         if pattern.match(req):
-#             valid.append(req)
-#         else:
-#             print(f"Invalid request format: {req}")
-#     return valid

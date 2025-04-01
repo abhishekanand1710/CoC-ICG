@@ -434,9 +434,9 @@ def get_classes_functions_for_file(file_path, context):
     return result
             
 
-context = analyze_codebase('swe_bench_cache/repos/astropy/astropy')
-# print(query_cumulative([{'type': 'other', 'query': '_operators@astropy/modeling/separable.py'}], context, 'swe_bench_cache/repos/astropy/astropy'))
+context = analyze_codebase('swe_bench_verified_cache/repos/astropy/astropy')
+# print(query_cumulative([{'type': 'other', 'query': '_operators@astropy/modeling/separable.py'}], context, 'swe_bench_verified_cache/repos/astropy/astropy'))
 # with open('context.json', 'w') as f:
 #     json.dump(context, f)
 # print(query_context('_separable', 'function', context, 'blah'))
-# generate_repo_structure('swe_bench_cache/repos/django/django')
+# generate_repo_structure('swe_bench_verified_cache/repos/django/django')

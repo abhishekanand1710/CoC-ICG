@@ -18,7 +18,7 @@ import ast
 from utils.repo_utils import *
 from utils.response_utils import *
 from utils.dataset_utils import *
-from prompts_coc_v2 import *
+from prompts_self_planning import *
 import operator
 from swe_agent_code_parser import *
 
@@ -33,7 +33,6 @@ MAX_STEPS = 70
 class GraphState(TypedDict):
     instance_id: str
     issue: str
-    iterations: int
     context_chain: List[dict]
     retrieved_keys: set
     candidate_context: Dict
@@ -129,8 +128,7 @@ def format_context_chain(context_chain: List[Dict]):
         context = CONTEXT_TEMPLATE.format(
             name = name,
             file_path = context["file_path"],
-            content = content,
-            iteration = context["retrieved_at"]
+            content = content
         )
         context_str += context
 
@@ -164,14 +162,12 @@ def initialize(state: GraphState):
     return {
         "instance_id": state["instance_id"],
         "issue": state["issue"],
-        "iterations": 0,
         "context_chain": [],
         "retrieved_keys": set(),
         "candidate_context": [],
         "requested_context": [],
         "analysis": None,
         "solution": None,
-        "analysis_log": {},
         "test_cases": [],
         "repo_path": state["repo_path"],
         "patch_files": List[str],
@@ -183,45 +179,22 @@ def analyze(state: GraphState):
     if not context_str:
         context_str = "No context fetched yet."
 
-    agent_prompt = ChatPromptTemplate.from_template(ANALYSIS_PROMPT_V2)
+    agent_prompt = ChatPromptTemplate.from_template(ANALYSIS_PROMPT)
     chain = agent_prompt | llm
-
-    iteration_check_statement = ""
-    if state["iterations"] > MAX_STEPS - 10:
-        iteration_check_statement = """This is iteration - {state["iterations"] and you have exhausted all your turns for requesting more code.
-Carefully analyze the issue, available code information and the codebase structure to debug the issue and provide the solution in the required format."""
-
-    analysis_log = '\n'.join(state["analysis_log"].values()) if state["analysis_log"] else "There are no previous requests at this point."
-
-    previous_analysis = "This is the first analysis."
-    if state["analysis"]:
-        previous_analysis = state["analysis"]
 
     result = chain.invoke({
         "issue_description": state["issue"],
-        # "repo_structure": state["repo_structure"],
         "modules": '\n'.join(codebase_index['modules'].keys()),
-        "cur_iteration": state["iterations"],
-        "context_str": context_str,
-        "analysis_log": analysis_log,
-        "previous_analysis": previous_analysis,
-        "iteration_check_statement": iteration_check_statement
+        "context_str": context_str
     })
     
     response = result.content
-    req_context, parsed_response = parse_analysis_response(response)
-    
-    if req_context:
-        return {
-            "iterations": state["iterations"] + 1,
-            "requested_context": parsed_response,
-            "analysis": response
-        }
-    else:
-        return {
-            "iterations": state["iterations"] + 1,
-            "analysis": parsed_response
-        }
+    _, parsed_response = parse_analysis_response(response)
+
+    return {
+        "requested_context": parsed_response,
+        "analysis": response
+    }
 
 def retrieve_cumulative(state: GraphState):
     retrieved = {}
@@ -254,7 +227,6 @@ def retrieve_cumulative(state: GraphState):
     retrieved_data = query_cumulative(queries, codebase_index, state["repo_path"])
 
     retrieved_keys = state["retrieved_keys"]
-    analysis_log = state["analysis_log"]
 
     for func in functions:
         key, reason = func
@@ -271,10 +243,8 @@ def retrieve_cumulative(state: GraphState):
             "name": name,
             "file_path": data["file_path"],
             "content": data["definition"],
-            "retrieved_at": state["iterations"],
             "reason": reason
         }
-        analysis_log[key] = f"NEED_CONTEXT: FUNCTION = {key}"
     for cls_ in classes:
         key, reason = cls_
         if key in retrieved_keys:
@@ -290,10 +260,8 @@ def retrieve_cumulative(state: GraphState):
             "name": name,
             "file_path": data["file_path"],
             "content": data["definition"],
-            "retrieved_at": state["iterations"],
             "reason": reason
         }
-        analysis_log[key] = f"NEED_CONTEXT: CLASS = {key}"
 
     for file in files:
         key, reason = file
@@ -311,11 +279,9 @@ def retrieve_cumulative(state: GraphState):
             "name": file_path.split("/")[-1],
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"],
             "reason": reason,
             # "additional_content": additional_content
         }
-        analysis_log[key] = f"NEED_CONTEXT: FILE = {key}"
 
     for key, reason in modules:
         if key in retrieved_keys:
@@ -332,11 +298,9 @@ def retrieve_cumulative(state: GraphState):
             "name": key,
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"],
             "reason": reason,
             # "additional_content": additional_content
         }
-        analysis_log[key] = f"NEED_MODULE: {key}"
 
     for entity, file in others.items():
         key, reason = file
@@ -354,18 +318,14 @@ def retrieve_cumulative(state: GraphState):
             "name": f"{entity}@{key}",
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"],
             "reason": reason,
             # "additional_content": additional_content
         }
-        analysis_log[f"{entity}@{key}"] = f"NEED_CONTEXT: OTHER = {entity}@{key}"
     
     return {
-        "context_chain": state["context_chain"],
-        "candidate_context": retrieved,
+        "context_chain": retrieved.values(),
         "requested_context": [],
-        "analysis_log": analysis_log,
-        "iterations": state["iterations"] + 1,
+        
         "retrieved_keys": retrieved_keys
     }
 
@@ -396,7 +356,6 @@ def retrieve(state: GraphState):
             "name": name,
             "file_path": data["file_path"],
             "content": data["definition"],
-            "retrieved_at": state["iterations"],
             "reason": reason
         }
         analysis_log[key] = f"NEED_CONTEXT: FUNCTION = {key}"
@@ -415,7 +374,6 @@ def retrieve(state: GraphState):
             "name": name,
             "file_path": data["file_path"],
             "content": data["definition"],
-            "retrieved_at": state["iterations"],
             "reason": reason
         }
         analysis_log[key] = f"NEED_CONTEXT: CLASS = {key}"
@@ -434,7 +392,6 @@ def retrieve(state: GraphState):
             "name": file_path.split("/")[-1],
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"],
             "reason": reason
         }
         analysis_log[key] = f"NEED_CONTEXT: FILE = {key}"
@@ -452,7 +409,6 @@ def retrieve(state: GraphState):
             "name": key,
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"],
             "reason": reason
         }
         analysis_log[key] = f"NEED_MODULE: {key}"
@@ -471,74 +427,28 @@ def retrieve(state: GraphState):
             "name": f"{entity}@{key}",
             "file_path": file_path,
             "content": data,
-            "retrieved_at": state["iterations"],
             "reason": reason
         }
         analysis_log[f"{entity}@{key}"] = f"NEED_CONTEXT: OTHER = {entity}@{key}"
     
     return {
-        "context_chain": state["context_chain"],
-        "candidate_context": retrieved,
+        "context_chain": retrieved.values(),
         "requested_context": [],
         "analysis_log": analysis_log,
-        "iterations": state["iterations"] + 1,
         "retrieved_keys": retrieved_keys
     }
 
-def filter_context(state: GraphState):
-    context_chain = state["context_chain"]
-    candidate_context = state["candidate_context"]
-
-    analysis_log = state["analysis_log"]
-
-    if candidate_context:
-        context_str = format_context_chain(context_chain)
-        if not context_str:
-            context_str = "No relevant code fetched yet."
-        for query, context in candidate_context.items():
-            candidate_context_str = format_candidate_context(context, context["reason"].strip().removesuffix("Reason:").strip())
-
-            agent_prompt = ChatPromptTemplate.from_template(FILTER_PROMPT_V2)
-            chain = agent_prompt | llm
-            result = chain.invoke({
-                "issue_description": state["issue"],
-                "context_str": context_str,
-                "candidate_context_str": candidate_context_str,
-            })
-            response = result.content
-
-            is_relevant, code = parse_filter_response(response)
-            if is_relevant:
-                # if code:
-                #     context["content"] = code
-                context_chain.append(context)
-                analysis_log[query] = analysis_log[query] + " -> Code was relevant and is included above."
-            else:
-                if query in analysis_log:
-                    analysis_log[query] = analysis_log[query] + " -> Code was irrelevant. Don't request it again."
-            
-            context_str = format_context_chain(context_chain)
-
-    return {
-        "context_chain": context_chain,
-        "analysis_log": analysis_log,
-        "iterations": state["iterations"] + 1
-    }
-
 def solve(state: GraphState):
-    analysis = state["analysis"]
     context_str = format_context_chain(state["context_chain"])
     agent_prompt = ChatPromptTemplate.from_template(SOLVE_AND_ANALYZE_PROMPT)
     chain = agent_prompt | llm_greedy
     result = chain.invoke({
         "issue_description": state["issue"],
-        "context_str": context_str,
-        "analysis": analysis
+        "context_str": context_str
     })
     response = result.content
     return {
-        "solution": response,
-        "iterations": state["iterations"] + 1
+        "solution": response
     }
 
 def localize(state: GraphState):
@@ -554,8 +464,7 @@ def localize(state: GraphState):
     response = result.content
     patch_files = parse_file_request_response(response)
     return {
-        "patch_files": patch_files,
-        "iterations": state["iterations"] + 1
+        "patch_files": patch_files
     }
 
 def generate_patch(state: GraphState):
@@ -587,8 +496,7 @@ def generate_patch(state: GraphState):
         file_edit_snippets_dict[file] = file_edit_snippets
 
     return {
-        "file_edits": file_edit_snippets_dict,
-        "iterations": state["iterations"] + 1
+        "file_edits": file_edit_snippets_dict
     }
 
 def create_agent_graph():
@@ -597,29 +505,14 @@ def create_agent_graph():
     workflow.add_node("init", initialize)
     workflow.add_node("analyze", analyze)
     workflow.add_node("retrieve", retrieve_cumulative)
-    workflow.add_node("filter", filter_context)
-    # workflow.add_node("generate_test", generate_test)
     workflow.add_node("solve", solve)
     workflow.add_node("localize", localize)
     workflow.add_node("generate_patch", generate_patch)
     workflow.add_node("save", lambda s: s)
 
-    # workflow.add_conditional_edges(
-    #     "analyze",
-    #     lambda s: "retrieve" if len(s["requested_context"]) > 0 else "generate_test",
-    #     {"retrieve": "retrieve", "generate_test": "generate_test"}
-    # )
-
-    workflow.add_conditional_edges(
-        "analyze",
-        lambda s: "retrieve" if len(s["requested_context"]) > 0 else "solve",
-        {"retrieve": "retrieve", "solve": "solve"}
-    )
-
     workflow.add_edge("init", "analyze")
-    workflow.add_edge("retrieve", "filter")
-    workflow.add_edge("filter", "analyze")
-    # workflow.add_edge("generate_test", "solve")
+    workflow.add_edge("analyze", "retrieve")
+    workflow.add_edge("retrieve", "solve")
     workflow.add_edge("solve", "localize")
     workflow.add_edge("localize", "generate_patch")
     workflow.add_edge("generate_patch", "save")

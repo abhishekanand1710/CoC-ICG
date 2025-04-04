@@ -1,0 +1,2 @@
+coc_verified_1 = 82.17
+coc_verified_2 = 139.80

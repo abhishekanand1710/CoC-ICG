@@ -1,2 +1,4 @@
 coc_verified_1 = 82.17
 coc_verified_2 = 139.80
+self_plan_1 = 82.69
+self_plan_2 = 48.46

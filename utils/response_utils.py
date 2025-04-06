@@ -15,8 +15,17 @@ def parse_analysis_response(response):
         req_modules = []
         others = {}
 
-        for line in response_lines:
+        line_by_line_analysis_start_idx = None
+        line_by_line_analysis_end_idx = None
+
+        for idx, line in enumerate(response_lines):
             line = line.strip()
+            if 'LINE-BY-LINE ANALYSIS' in line:
+                line_by_line_analysis_start_idx = idx + 1
+                continue
+            if 'NEW REQUESTS' in line:
+                line_by_line_analysis_end_idx = idx
+                continue
             try:
                 if 'NEED_CONTEXT' in line:
                     line, reason = line.split('|', 1)
@@ -39,13 +48,18 @@ def parse_analysis_response(response):
                     module_name = line.split(':')[-1].strip()
                     req_modules.append((module_name, reason))
             except: continue
+        
+        line_by_line_analysis = None
+        if line_by_line_analysis_start_idx and line_by_line_analysis_end_idx:
+            line_by_line_analysis = '\n'.join(response_lines[line_by_line_analysis_start_idx:line_by_line_analysis_end_idx]).strip()
 
         return True, {
             "functions": req_functions,
             "classes": req_classes,
             "files": req_files,
             "others": others,
-            "modules": req_modules
+            "modules": req_modules,
+            "line_by_line_analysis": line_by_line_analysis
         }
     else:
         return False, response

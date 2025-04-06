@@ -14,12 +14,10 @@ import re
 import argparse
 from tqdm import tqdm
 import traceback
-import ast
 from utils.repo_utils import *
 from utils.response_utils import *
 from utils.dataset_utils import *
 from prompts_coc_v2 import *
-import operator
 from swe_agent_code_parser import *
 
 llm = None
@@ -34,7 +32,9 @@ class GraphState(TypedDict):
     instance_id: str
     issue: str
     iterations: int
-    context_chain: List[dict]
+    fetch_context_iteration: int
+    context_chain: Dict
+    iteration_analysis: Dict
     retrieved_keys: set
     candidate_context: Dict
     requested_context: Dict
@@ -82,31 +82,37 @@ def get_repository_files_list(base_path, repo_path: str) -> str:
     #     f.write('\n'.join(file_paths))
     return file_paths
 
-def get_repository_files(repo_path: str, path: str = "") -> str:
-    """List files at a specific path in the repository."""
-    target_path = os.path.join(repo_path, path)
-    
-    if not os.path.exists(target_path):
-        return f"Path '{path}' does not exist"
-    
-    result = []
-    for root, dirs, files in os.walk(target_path):
-        rel_root = os.path.relpath(root, repo_path)
-        if rel_root == ".":
-            rel_root = ""
-            
-        for d in dirs:
-            rel_path = os.path.join(rel_root, d)
-        
-        for f in files:
-            rel_path = os.path.join(rel_root, f)
-            result.append(f"📄 {rel_path}")
-            
-        break
-    
-    return "\n".join(result)
+def format_context_chain(context_chain: Dict, iteration_analysis: Dict):
+    context_str = ""
+    for iteration, itr_context in context_chain.items():
+        analysis = iteration_analysis[iteration]
+        itr_context_str = ""
+        for context in itr_context:
+            content = context['content'].removeprefix('```python')
+            content = content.removesuffix('```').strip()
+            reason = context["reason"].strip().removeprefix("Reason:").strip()
 
-def format_context_chain(context_chain: List[Dict]):
+            name = context["name"]
+            if not name.endswith('.py'):
+                name = name.split(".")[-1]
+
+            context = CONTEXT_TEMPLATE.format(
+                name = name,
+                reason = reason,
+                file_path = context["file_path"],
+                content = content
+            )
+            itr_context_str += context
+        
+        context_str += ITER_CONTEXT_TEMPLATE.format(
+            iteration = iteration,
+            analysis = analysis,
+            code = itr_context_str
+        )
+
+    return context_str
+
+def format_context_chain_min(context_chain: List[Dict]):
     context_str = ""
     for context in context_chain:
         content = context['content'].removeprefix('```python')
@@ -116,21 +122,12 @@ def format_context_chain(context_chain: List[Dict]):
         if not name.endswith('.py'):
             name = name.split(".")[-1]
 
-        # if "additional_content" in context:
-        #     context = CONTEXT_TEMPLATE_EXTN.format(
-        #         name = name,
-        #         file_path = context["file_path"],
-        #         content = content,
-        #         iteration = context["retrieved_at"],
-        #         additional_content = context["additional_content"]
-        #     )
-        #     context_str += context
-        # else:
         context = CONTEXT_TEMPLATE.format(
             name = name,
             file_path = context["file_path"],
             content = content,
-            iteration = context["retrieved_at"]
+            iteration = context["retrieved_at"],
+            reason = context["reason"].strip().removeprefix("Reason:").strip()
         )
         context_str += context
 
@@ -141,7 +138,7 @@ def format_candidate_context(context: Dict, reason: str):
     content = context['content'].removeprefix('```python')
     content = content.removesuffix('```').strip()
 
-    name = context["name"]
+    name = context["name"] 
     if not name.endswith('.py'):
         name = name.split(".")[-1]
 
@@ -165,7 +162,9 @@ def initialize(state: GraphState):
         "instance_id": state["instance_id"],
         "issue": state["issue"],
         "iterations": 0,
-        "context_chain": [],
+        "fetch_context_iteration": 0,
+        "iteration_analysis": {},
+        "context_chain": {},
         "retrieved_keys": set(),
         "candidate_context": [],
         "requested_context": [],
@@ -179,7 +178,7 @@ def initialize(state: GraphState):
     }
 
 def analyze(state: GraphState):
-    context_str = format_context_chain(state["context_chain"])
+    context_str = format_context_chain(state["context_chain"], state["iteration_analysis"])
     if not context_str:
         context_str = "No context fetched yet."
 
@@ -205,7 +204,7 @@ Carefully analyze the issue, available code information and the codebase structu
         "context_str": context_str,
         "analysis_log": analysis_log,
         "previous_analysis": previous_analysis,
-        "iteration_check_statement": iteration_check_statement
+        "iteration_check_statement": iteration_check_statement,
     })
     
     response = result.content
@@ -215,7 +214,8 @@ Carefully analyze the issue, available code information and the codebase structu
         return {
             "iterations": state["iterations"] + 1,
             "requested_context": parsed_response,
-            "analysis": response
+            "analysis": response,
+            "fetch_context_iteration": state["fetch_context_iteration"] + 1
         }
     else:
         return {
@@ -360,124 +360,12 @@ def retrieve_cumulative(state: GraphState):
         }
         analysis_log[f"{entity}@{key}"] = f"NEED_CONTEXT: OTHER = {entity}@{key}"
     
+    iteration_analysis = state["iteration_analysis"]
+    iteration_analysis[state["fetch_context_iteration"]] = requested_context["line_by_line_analysis"]
+
     return {
         "context_chain": state["context_chain"],
-        "candidate_context": retrieved,
-        "requested_context": [],
-        "analysis_log": analysis_log,
-        "iterations": state["iterations"] + 1,
-        "retrieved_keys": retrieved_keys
-    }
-
-def retrieve(state: GraphState):
-    retrieved = {}
-    requested_context = state["requested_context"]
-    functions = requested_context["functions"]
-    classes = requested_context["classes"]
-    files = requested_context["files"]
-    modules = requested_context["modules"]
-    others = requested_context["others"]
-
-    analysis_log = state["analysis_log"]
-
-    retrieved_keys = state["retrieved_keys"]
-
-    for func in functions:
-        key, reason = func
-        if key in retrieved_keys:
-            continue
-        retrieved_keys.add(key)
-
-        fetched_context = query_context(key, "function", codebase_index, state["repo_path"])
-        if not fetched_context:
-            continue
-        name, data = fetched_context
-        retrieved[key] = {
-            "name": name,
-            "file_path": data["file_path"],
-            "content": data["definition"],
-            "retrieved_at": state["iterations"],
-            "reason": reason
-        }
-        analysis_log[key] = f"NEED_CONTEXT: FUNCTION = {key}"
-
-    for cls_ in classes:
-        key, reason = cls_
-        if key in retrieved_keys:
-            continue
-        retrieved_keys.add(key)
-
-        fetched_context = query_context(key, "class", codebase_index, state["repo_path"])
-        if not fetched_context:
-            continue
-        name, data = fetched_context
-        retrieved[key] = {
-            "name": name,
-            "file_path": data["file_path"],
-            "content": data["definition"],
-            "retrieved_at": state["iterations"],
-            "reason": reason
-        }
-        analysis_log[key] = f"NEED_CONTEXT: CLASS = {key}"
-
-    for file in files:
-        key, reason = file
-        if key in retrieved_keys:
-            continue
-        retrieved_keys.add(key)
-
-        fetched_context = query_context(key, "file", codebase_index, state["repo_path"])
-        if not fetched_context:
-            continue
-        file_path, data = fetched_context
-        retrieved[key] = {
-            "name": file_path.split("/")[-1],
-            "file_path": file_path,
-            "content": data,
-            "retrieved_at": state["iterations"],
-            "reason": reason
-        }
-        analysis_log[key] = f"NEED_CONTEXT: FILE = {key}"
-
-    for key, reason in modules:
-        if key in retrieved_keys:
-            continue
-        retrieved_keys.add(key)
-
-        fetched_context = query_context(key, "module", codebase_index, state["repo_path"])
-        if not fetched_context:
-            continue
-        file_path, data = fetched_context
-        retrieved[key] = {
-            "name": key,
-            "file_path": file_path,
-            "content": data,
-            "retrieved_at": state["iterations"],
-            "reason": reason
-        }
-        analysis_log[key] = f"NEED_MODULE: {key}"
-
-    for entity, file in others.items():
-        key, reason = file
-        if key in retrieved_keys:
-            continue
-        retrieved_keys.add(key)
-
-        fetched_context = query_context(key, "file", codebase_index, state["repo_path"])
-        if not fetched_context:
-            continue
-        file_path, data = fetched_context
-        retrieved[f"{entity}@{key}"] = {
-            "name": f"{entity}@{key}",
-            "file_path": file_path,
-            "content": data,
-            "retrieved_at": state["iterations"],
-            "reason": reason
-        }
-        analysis_log[f"{entity}@{key}"] = f"NEED_CONTEXT: OTHER = {entity}@{key}"
-    
-    return {
-        "context_chain": state["context_chain"],
+        "iteration_analysis": iteration_analysis,
         "candidate_context": retrieved,
         "requested_context": [],
         "analysis_log": analysis_log,
@@ -492,11 +380,13 @@ def filter_context(state: GraphState):
     analysis_log = state["analysis_log"]
 
     if candidate_context:
-        context_str = format_context_chain(context_chain)
+        context_str = format_context_chain(context_chain, state["iteration_analysis"])
         if not context_str:
             context_str = "No relevant code fetched yet."
+        
+        context_chain[state["fetch_context_iteration"]] = []
         for query, context in candidate_context.items():
-            candidate_context_str = format_candidate_context(context, context["reason"].strip().removesuffix("Reason:").strip())
+            candidate_context_str = format_candidate_context(context, context["reason"].strip().removeprefix("Reason:").strip())
 
             agent_prompt = ChatPromptTemplate.from_template(FILTER_PROMPT_V2)
             chain = agent_prompt | llm
@@ -511,13 +401,13 @@ def filter_context(state: GraphState):
             if is_relevant:
                 # if code:
                 #     context["content"] = code
-                context_chain.append(context)
+                context_chain[state["fetch_context_iteration"]].append(context)
                 analysis_log[query] = analysis_log[query] + " -> Code was relevant and is included above."
             else:
                 if query in analysis_log:
                     analysis_log[query] = analysis_log[query] + " -> Code was irrelevant. Don't request it again."
             
-            context_str = format_context_chain(context_chain)
+            context_str = format_context_chain(context_chain, state["iteration_analysis"])
 
     return {
         "context_chain": context_chain,
@@ -527,7 +417,7 @@ def filter_context(state: GraphState):
 
 def solve(state: GraphState):
     analysis = state["analysis"]
-    context_str = format_context_chain(state["context_chain"])
+    context_str = format_context_chain(state["context_chain"], state["iteration_analysis"])
     agent_prompt = ChatPromptTemplate.from_template(SOLVE_AND_ANALYZE_PROMPT)
     chain = agent_prompt | llm_greedy
     result = chain.invoke({
@@ -543,7 +433,7 @@ def solve(state: GraphState):
 
 def localize(state: GraphState):
     solution = state["solution"]
-    context_str = format_context_chain(state["context_chain"])
+    context_str = format_context_chain(state["context_chain"], state["iteration_analysis"])
     agent_prompt = ChatPromptTemplate.from_template(REQUEST_FILES_TO_BE_EDITED_PROMPT)
     chain = agent_prompt | llm
     result = chain.invoke({
@@ -563,14 +453,15 @@ def generate_patch(state: GraphState):
     context_chain = state["context_chain"]
 
     patch_context_dict = {file: [] for file in patch_files}
-    for context in context_chain:
-        if context["file_path"] in patch_context_dict:
-            patch_context_dict[context["file_path"]].append(context)
+    for iter_context in context_chain.values():
+        for context in iter_context:
+            if context["file_path"] in patch_context_dict:
+                patch_context_dict[context["file_path"]].append(context)
 
     edited_patch_files = []
     file_edit_snippets_dict = {}
     for file, file_relevant_context in patch_context_dict.items():
-        file_relevant_context_str = format_context_chain(file_relevant_context)
+        file_relevant_context_str = format_context_chain_min(file_relevant_context)
 
         agent_prompt = ChatPromptTemplate.from_template(PATCH_GENERATION_PROMPT)
         chain = agent_prompt | llm

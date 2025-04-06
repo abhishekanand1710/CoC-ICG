@@ -108,10 +108,6 @@ ANALYSIS_PROMPT_V2 = """As a senior engineer, debug this GitHub issue. Follow st
 
 ## Your previous analysis and all the code you requested:
 
-**Your previous analysis**:
-{previous_analysis}
-
-**Your requested code**: 
 {context_str}
 
 **Previous Requests**:
@@ -119,10 +115,13 @@ ANALYSIS_PROMPT_V2 = """As a senior engineer, debug this GitHub issue. Follow st
 
 
 **Output either**:
-new context/module requests that have not been analyzed in the following format:
+Your updated line by line analysis of the issue with all the previous and new code you have and new context/module requests that have not been analyzed in the given format below.
+You may need to correct your previous analysis.
 
-Line-by-line analysis of relevant code:
-<analysis>
+LINE-BY-LINE ANALYSIS:
+1. <analysis>
+2. <analysis>
+...
 
 NEW REQUESTS:
 <requests>
@@ -243,14 +242,22 @@ SOLUTION:
 <code here>
 ```"""
 
+ITER_CONTEXT_TEMPLATE = """
+**Analysis at iteration {iteration}**:
+{analysis}
+
+**Code fetched after analysis**:
+{code}
+
+"""
+
 CONTEXT_TEMPLATE = """
 **File Path**: {file_path}
+**Reason behind requesting the code:** {reason}
 
 ```python
 {content}
 ```
-
-Requested at iteration {iteration}
 """
 
 CONTEXT_TEMPLATE_EXTN = """
@@ -268,7 +275,7 @@ Requested at iteration {iteration}
 
 CANDIDATE_CONTEXT_TEMPLATE = """
 #### Name: {name}
-**Reason behind requesting code:** {reason}
+**Reason behind requesting the code:** {reason}
 **File Path**: {file_path}
 
 ```python
@@ -367,7 +374,7 @@ FILE_REQUEST: src/model.py
 
 PATCH_GENERATION_PROMPT = """As a senior engineer, fixing a GitHub issue, follow the steps:
 1. Analyze the issue
-2. Read the solutio line by line
+2. Read the solution line by line
 
 **Issue:**  
 {issue_description}  

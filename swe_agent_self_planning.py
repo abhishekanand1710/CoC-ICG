@@ -597,8 +597,8 @@ def main(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SWE Agent using RAG")
     parser.add_argument("-m", "--model", type=str, help="Model to use", default="gpt-4o-mini")
-    parser.add_argument("-i", "--input_file", type=str, help="Dataset file for SWE-Bench", default="./swe_bench_verified_cache/dataset.json")
-    parser.add_argument("-d", "--dir", type=str, help="Directory containing SWE-Bench task repos", default="./swe_bench_verified_cache/repos")
+    parser.add_argument("-i", "--input_file", type=str, help="Dataset file for SWE-Bench", default="./swe_bench_cache/dataset.json")
+    parser.add_argument("-d", "--dir", type=str, help="Directory containing SWE-Bench task repos", default="./swe_bench_cache/repos")
     parser.add_argument("-r", "--run_id", type=str, help="Id for current run", required=True)
 
     args = parser.parse_args()

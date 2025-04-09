@@ -102,7 +102,7 @@ def apply_edits(file_path, edits):
                 del content[start_idx:end_idx]
         else:  # insert (start > end)
             insert_pos = end
-            content[insert_pos:insert_pos] = new_lines
+            content[insert_pos:insert_pos] = [new_lines]
     
     return '\n'.join(content)
 

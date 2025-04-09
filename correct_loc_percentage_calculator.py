@@ -8,10 +8,8 @@ from collections import defaultdict
 
 import re
 
-import re
-
 def parse_git_patch(patch_content):
-    """Parse git patch and extract modified files, functions and lines."""
+    """Parse git patch and extract modified files with their line changes."""
     files = {}
     
     # Split patch into files
@@ -31,16 +29,22 @@ def parse_git_patch(patch_content):
         filename = file_match.group(1)
         files[filename] = {
             'functions': set(),
-            'lines': set()
+            'modified_lines': set()  # Will store line identifiers of modified lines
         }
         
-        # Get function names and lines from hunks
+        # Get function names and line changes from hunks
         hunk_matches = list(re.finditer(r'@@ -(\d+),?(\d*) \+(\d+),?(\d*) @@(.*)', section))
         
         for i, hunk in enumerate(hunk_matches):
             func_name = hunk.group(5).strip()
             if func_name:
                 files[filename]['functions'].add(func_name)
+            
+            # Parse the hunk header
+            old_start = int(hunk.group(1))
+            old_count = int(hunk.group(2)) if hunk.group(2) else 1
+            new_start = int(hunk.group(3))
+            new_count = int(hunk.group(4)) if hunk.group(4) else 1
             
             # Get hunk content
             hunk_start = hunk.end() + 1
@@ -50,82 +54,114 @@ def parse_git_patch(patch_content):
             
             hunk_content = section[hunk_start:hunk_end]
             
-            # Extract lines from hunk
+            # Process line changes in the hunk
+            old_line = old_start
+            new_line = new_start
+            
             for line in hunk_content.split('\n'):
-                if line.startswith('+') or line.startswith('-'):
-                    # Just store the line type and content, no line numbers
-                    files[filename]['lines'].add((line[0], line[1:].strip()))
+                if not line:
+                    continue
+                
+                if line.startswith('+'):
+                    # Addition - record the line in the new file
+                    files[filename]['modified_lines'].add(f"{filename}:+{new_line}")
+                    new_line += 1
+                elif line.startswith('-'):
+                    # Deletion - record the line in the old file
+                    files[filename]['modified_lines'].add(f"{filename}:-{old_line}")
+                    old_line += 1
+                else:
+                    # Context line - increment both counters
+                    old_line += 1
+                    new_line += 1
     
     return files
 
-def check_patch_coverage(patch1, patch2):
-    """Check if patch1 covers patch2, returning detailed information."""
-    patch1_files = parse_git_patch(patch1)
-    patch2_files = parse_git_patch(patch2)
+def check_patch_coverage(gold_patch, test_patch):
+    """
+    Check if gold_patch covers test_patch by verifying that all lines
+    modified in test_patch are also modified in gold_patch.
+    """
+    gold_files = parse_git_patch(gold_patch)
+    test_files = parse_git_patch(test_patch)
     
+    # Collect all modified lines from both patches
+    gold_modified_lines = set()
+    for file_data in gold_files.values():
+        gold_modified_lines.update(file_data['modified_lines'])
+    
+    test_modified_lines = set()
+    for file_data in test_files.values():
+        test_modified_lines.update(file_data['modified_lines'])
+    
+    # Check if all test patch lines are covered by gold patch
+    missing_lines = test_modified_lines - gold_modified_lines
+    
+    # Organize results by file
     result = {
-        'complete_coverage': True,
+        'complete_coverage': len(missing_lines) == 0,
         'missing_files': [],
         'missing_functions': {},
         'missing_lines': {},
-        'coverage': {
-            'files': {'total': len(patch2_files), 'covered': 0},
-            'functions': {'total': 0, 'covered': 0},
-            'lines': {'total': 0, 'covered': 0}
+        'coverage_summary': {
+            'files': {
+                'total': len(test_files),
+                'covered': sum(1 for file in test_files if file in gold_files)
+            },
+            'lines': {
+                'total': len(test_modified_lines),
+                'covered': len(test_modified_lines - missing_lines)
+            }
         }
     }
     
-    # Count total functions and lines in patch2
-    for file_path, file_data in patch2_files.items():
-        result['coverage']['functions']['total'] += len(file_data['functions'])
-        result['coverage']['lines']['total'] += len(file_data['lines'])
+    # Identify missing files
+    result['missing_files'] = [file for file in test_files if file not in gold_files]
     
-    # Check coverage by file
-    for file_path, file_data in patch2_files.items():
-        if file_path not in patch1_files:
-            result['complete_coverage'] = False
-            result['missing_files'].append(file_path)
-            continue
+    # Organize missing lines by file
+    for line_id in missing_lines:
+        file_path, line_info = line_id.split(':')
+        if file_path not in result['missing_lines']:
+            result['missing_lines'][file_path] = []
+        result['missing_lines'][file_path].append(line_info)
+    
+    # Check function coverage
+    total_functions = 0
+    covered_functions = 0
+    
+    for file_path, file_data in test_files.items():
+        file_functions = file_data['functions']
+        total_functions += len(file_functions)
         
-        result['coverage']['files']['covered'] += 1
-        
-        # Check function coverage
-        for func_name in file_data['functions']:
-            if func_name in patch1_files[file_path]['functions']:
-                result['coverage']['functions']['covered'] += 1
-            else:
-                result['complete_coverage'] = False
-                if file_path not in result['missing_functions']:
-                    result['missing_functions'][file_path] = []
-                result['missing_functions'][file_path].append(func_name)
-        
-        # Check line coverage
-        file_covered_lines = 0
-        for line in file_data['lines']:
-            if line in patch1_files[file_path]['lines']:
-                file_covered_lines += 1
-            else:
-                result['complete_coverage'] = False
-                if file_path not in result['missing_lines']:
-                    result['missing_lines'][file_path] = []
-                result['missing_lines'][file_path].append(line)
-        
-        result['coverage']['lines']['covered'] += file_covered_lines
+        if file_path in gold_files:
+            gold_functions = gold_files[file_path]['functions']
+            missing_functions = file_functions - gold_functions
+            
+            if missing_functions:
+                result['missing_functions'][file_path] = list(missing_functions)
+            
+            covered_functions += len(file_functions) - len(missing_functions)
+    
+    # Add function coverage to summary
+    result['coverage_summary']['functions'] = {
+        'total': total_functions,
+        'covered': covered_functions
+    }
     
     # Calculate coverage percentages
     for metric in ['files', 'functions', 'lines']:
-        total = result['coverage'][metric]['total']
-        covered = result['coverage'][metric]['covered']
-        result['coverage'][metric]['percentage'] = (covered / total * 100) if total > 0 else 0
+        total = result['coverage_summary'][metric]['total']
+        covered = result['coverage_summary'][metric]['covered']
+        result['coverage_summary'][metric]['percentage'] = (covered / total * 100) if total > 0 else 100
     
     return result
 
-def is_patch_covered(covering_patch, covered_patch):
+def is_patch_covered(gold_patch, test_patch):
     """
-    Check if covering_patch covers all files, functions, and lines in covered_patch.
+    Check if gold_patch covers all line edits in test_patch.
     Returns a tuple of (boolean, coverage_data).
     """
-    coverage_info = check_patch_coverage(covering_patch, covered_patch)
+    coverage_info = check_patch_coverage(gold_patch, test_patch)
     return coverage_info['complete_coverage'], coverage_info
 
 def read_jsonl(file_path):
@@ -167,9 +203,9 @@ def main(args):
             "is_covered": is_covered,
             "coverage_info": coverage_info
         }
-        total_file_coverage += coverage_info["coverage"]["files"]["percentage"]
-        total_function_coverage += coverage_info["coverage"]["functions"]["percentage"]
-        total_line_coverage += coverage_info["coverage"]["lines"]["percentage"]
+        total_file_coverage += coverage_info["coverage_summary"]["files"]["percentage"]
+        total_function_coverage += coverage_info["coverage_summary"]["functions"]["percentage"]
+        total_line_coverage += coverage_info["coverage_summary"]["lines"]["percentage"]
 
     average_file_coverage = total_file_coverage / len(pred_patch_dict)
     average_function_coverage = total_function_coverage / len(pred_patch_dict)

@@ -1,0 +1,8 @@
+{
+    "per_instance_coverage": {},
+    "average_coverage": {
+        "file_coverage": 0.6966666666666667,
+        "function_coverage": 0.10333333333333333,
+        "line_coverage": 0.10333333333333333
+    }
+}

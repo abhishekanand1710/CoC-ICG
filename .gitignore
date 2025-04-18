@@ -10,3 +10,4 @@ set_envs.sh
 vendor
 swe_bench_verified_cache
 fix_patch.py
+all_results

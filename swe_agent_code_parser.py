@@ -44,30 +44,6 @@ def extract_codebase_context(codebase_path: str, max_files: Optional[int] = None
         )
     """)
     
-    import_query = PY_LANGUAGE.query("""
-        (import_statement
-          (dotted_name) @module_name)
-        
-        (import_from_statement
-          module_name: (dotted_name) @from_module
-          name: (dotted_name) @imported_name)
-    """)
-
-    global_query = PY_LANGUAGE.query("""
-        (module
-          (expression_statement
-            (assignment
-              left: [
-                (identifier) @global_var_name
-                (pattern_list
-                  (identifier) @global_var_name)
-              ]
-              right: (_) @global_var_value)) @global_assignment
-              
-          (expression_statement) @global_statement
-        )
-    """)
-    
     python_files = []
     for root, _, files in os.walk(codebase_path):
         for file in files:
@@ -113,27 +89,6 @@ def extract_codebase_context(codebase_path: str, max_files: Optional[int] = None
                 class_info["file_path"] = rel_path
                 file_info["classes"].append(class_info["name"])
                 context["classes"][f"{module_name}.{class_info['name']}"] = class_info
-            
-            # for match in global_query.matches(root_node):
-            #     print(rel_path)
-            #     global_info = extract_global_info(match, code)
-            #     global_info["file_path"] = rel_path
-            #     file_info["global"].append(global_info["file_path"])
-            #     context["global"][f"{module_name}.{global_info['name']}"] = class_info
-            
-            # # imports
-            # for match in import_query.matches(root_node):
-            #     import_info = extract_import_info(match, code)
-            #     file_info["imports"].extend(import_info)
-            #     for imp in import_info:
-            #         if imp not in context["imports"]:
-            #             context["imports"][imp] = []
-            #         context["imports"][imp].append(module_name)
-                    
-            #         # # Track external dependencies
-            #         # if not is_standard_library(imp.split('.')[0]):
-            #         #     if imp.split('.')[0] not in context["dependencies"]:
-            #         #         context["dependencies"].append(imp.split('.')[0])
             
             context["file_structure"][rel_path] = file_info
 
@@ -280,11 +235,6 @@ def analyze_codebase(codebase_path, output_path='file_structure.json', max_files
         raise ValueError(f"Path does not exist: {codebase_path}")
     
     context = extract_codebase_context(codebase_path, max_files)
-    
-    # if output_path:
-    #     with open(output_path, 'w', encoding='utf-8') as f:
-    #         json.dump(context['file_structure'], f, indent=2)
-    
     return context
 
 def query_min(query, type, context, codebase_path):
@@ -363,7 +313,6 @@ def query_context(query, type, context, codebase_path):
                 matched_key = path
                 code = get_file_content(codebase_path, path)
             
-    
     if matched_key:
         if isinstance(code, Dict):
             code_lines = code['definition'].split('\n')
@@ -432,11 +381,3 @@ def get_classes_functions_for_file(file_path, context):
         result += "\n\n**Classes in file**: \n" + "\n".join(classes)
 
     return result
-            
-
-context = analyze_codebase('swe_bench_verified_cache/repos/astropy/astropy')
-# print(query_cumulative([{'type': 'other', 'query': '_operators@astropy/modeling/separable.py'}], context, 'swe_bench_verified_cache/repos/astropy/astropy'))
-# with open('context.json', 'w') as f:
-#     json.dump(context, f)
-# print(query_context('_separable', 'function', context, 'blah'))
-# generate_repo_structure('swe_bench_verified_cache/repos/django/django')

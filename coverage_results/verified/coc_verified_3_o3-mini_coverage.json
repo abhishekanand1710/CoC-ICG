@@ -1,7 +1,6 @@
 {
     "average_coverage": {
         "file_coverage": 0.684,
-        "function_coverage": 0.434,
         "line_coverage": 0.368
     }
 }

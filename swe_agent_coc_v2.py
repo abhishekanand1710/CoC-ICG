@@ -152,8 +152,6 @@ def format_candidate_context(context: Dict, reason: str):
 
     return context_str
 
-#####################################################
-
 
 ## stages - nodes
 
@@ -198,7 +196,6 @@ Carefully analyze the issue, available code information and the codebase structu
 
     result = chain.invoke({
         "issue_description": state["issue"],
-        # "repo_structure": state["repo_structure"],
         "modules": '\n'.join(codebase_index['modules'].keys()),
         "cur_iteration": state["iterations"],
         "context_str": context_str,
@@ -306,14 +303,12 @@ def retrieve_cumulative(state: GraphState):
         if key not in retrieved_data:
             continue
         file_path, data = retrieved_data[key]
-        # additional_content = get_classes_functions_for_file(file_path, codebase_index)
         retrieved[key] = {
             "name": file_path.split("/")[-1],
             "file_path": file_path,
             "content": data,
             "retrieved_at": state["iterations"],
             "reason": reason,
-            # "additional_content": additional_content
         }
         analysis_log[key] = f"NEED_CONTEXT: FILE = {key}"
 
@@ -327,14 +322,12 @@ def retrieve_cumulative(state: GraphState):
         if key not in retrieved_data:
             continue
         file_path, data = retrieved_data[key]
-        # additional_content = get_classes_functions_for_file(file_path, codebase_index)
         retrieved[key] = {
             "name": key,
             "file_path": file_path,
             "content": data,
             "retrieved_at": state["iterations"],
-            "reason": reason,
-            # "additional_content": additional_content
+            "reason": reason
         }
         analysis_log[key] = f"NEED_MODULE: {key}"
 
@@ -349,14 +342,12 @@ def retrieve_cumulative(state: GraphState):
         if key not in retrieved_data:
             continue
         file_path, data = retrieved_data[key]
-        # additional_content = get_classes_functions_for_file(file_path, codebase_index)
         retrieved[f"{entity}@{key}"] = {
             "name": f"{entity}@{key}",
             "file_path": file_path,
             "content": data,
             "retrieved_at": state["iterations"],
-            "reason": reason,
-            # "additional_content": additional_content
+            "reason": reason
         }
         analysis_log[f"{entity}@{key}"] = f"NEED_CONTEXT: OTHER = {entity}@{key}"
     
@@ -489,17 +480,10 @@ def create_agent_graph():
     workflow.add_node("analyze", analyze)
     workflow.add_node("retrieve", retrieve_cumulative)
     workflow.add_node("filter", filter_context)
-    # workflow.add_node("generate_test", generate_test)
     workflow.add_node("solve", solve)
     workflow.add_node("localize", localize)
     workflow.add_node("generate_patch", generate_patch)
     workflow.add_node("save", lambda s: s)
-
-    # workflow.add_conditional_edges(
-    #     "analyze",
-    #     lambda s: "retrieve" if len(s["requested_context"]) > 0 else "generate_test",
-    #     {"retrieve": "retrieve", "generate_test": "generate_test"}
-    # )
 
     workflow.add_conditional_edges(
         "analyze",
@@ -510,7 +494,6 @@ def create_agent_graph():
     workflow.add_edge("init", "analyze")
     workflow.add_edge("retrieve", "filter")
     workflow.add_edge("filter", "analyze")
-    # workflow.add_edge("generate_test", "solve")
     workflow.add_edge("solve", "localize")
     workflow.add_edge("localize", "generate_patch")
     workflow.add_edge("generate_patch", "save")
@@ -565,8 +548,6 @@ def main(args):
                     "model_patch": result_patch,
                     "model_name_or_path": args.model
                 }
-                # print(result_patch)
-                # break
                 preds.append(output)
             except Exception:
                 traceback.print_exc()
@@ -586,11 +567,8 @@ def main(args):
         
     with open(output_file, "w") as f:
         json.dump(preds, f)
-    # with open(responses_file, "w") as f:
-    #     json.dump(cur_responses, f)
     
     print(f"Predictions saved to {output_file}")
-    # print(f"Responses saved to {responses_file}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SWE Agent using RAG")

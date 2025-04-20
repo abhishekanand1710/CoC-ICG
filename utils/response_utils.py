@@ -1,12 +1,17 @@
 import re
 
 def extract_patch_from_markdown(text):
-    import re
+    '''
+    Extracts patch from model response
+    '''
     pattern = r'```(?:patch|diff)\n(.*?)```'
     match = re.search(pattern, text, re.DOTALL)
     return match.group(1).rstrip() if match else None
 
 def parse_analysis_response(response):
+    '''
+    Extracts context requests if they exist from the analysis stage response or returns
+    '''
     if 'NEED_CONTEXT' in response or 'NEED_MODULE' in response:
         response_lines = response.split('\n')
         req_functions = []
@@ -65,6 +70,9 @@ def parse_analysis_response(response):
         return False, response
 
 def parse_file_request_response(response):
+    '''
+    Parses a file request response to return the list of files requested for editing
+    '''
     response_lines = response.split("\n")
     file_requests = []
     for line in response_lines:
@@ -76,6 +84,9 @@ def parse_file_request_response(response):
     return file_requests
 
 def parse_filter_response(response):
+    '''
+    Parses a filter stage response and returns whether retrieved code is relevant to the issue.
+    '''
     response_lines = response.split("\n")
 
     is_relevant = False
@@ -104,16 +115,10 @@ def parse_filter_response(response):
     
     return is_relevant, None
 
-def parse_test_response(response):
-    pattern = r'TEST CASE:\s*```python\n(.*?)```'
-    matches = re.finditer(pattern, response, re.DOTALL)
-    test_cases = []
-    for match in matches:
-        code = match.group(1)
-        test_cases.append(code)
-    return test_cases
-
 def parse_file_edit_response(response):
+    '''
+    Parses edit stage response to return file edit data containing line numbers and code snippets
+    '''
     pattern = r'EDIT CODE (\d+),(\d+):\s*```python\n(.*?)```'
     matches = re.finditer(pattern, response, re.DOTALL)
     code_edit_snippets = []
@@ -123,6 +128,3 @@ def parse_file_edit_response(response):
         code = match.group(3)
         code_edit_snippets.append((start_line, end_line, code))
     return code_edit_snippets
-
-
-# print(parse_file_edit_response("EDIT CODE 1194,1193:\n```python\n    def visit_Compare(self, node):\n        # Transform a comparison e.g. \"1 < 2\" into a call to the appropriate\n        # relational constructor with evaluate=False.\n        # Only support simple comparisons (one operator, one comparator).\n        if len(node.ops) != 1 or len(node.comparators) != 1:\n            # For chained comparisons, fall back to generic visit.\n            return self.generic_visit(node)\n        left = self.visit(node.left)\n        right = self.visit(node.comparators[0])\n        op = node.ops[0]\n        # Mapping from ast comparison operator to the corresponding Sympy class name.\n        op_mapping = {\n            ast.Lt: \"Lt\",\n            ast.LtE: \"Le\",\n            ast.Gt: \"Gt\",\n            ast.GtE: \"Ge\",\n            ast.Eq: \"Eq\",\n            ast.NotEq: \"Ne\",\n        }\n        op_name = None\n        for op_type, name in op_mapping.items():\n            if isinstance(op, op_type):\n                op_name = name\n                break\n        if op_name is None:\n            # If operator is not in our mapping, leave unchanged.\n            return self.generic_visit(node)\n        new_node = ast.Call(\n            func=ast.Name(id=op_name, ctx=ast.Load()),\n            args=[left, right],\n            keywords=[ast.keyword(arg='evaluate', value=ast.NameConstant(value=False, ctx=ast.Load()))]\n        )\n        return ast.copy_location(new_node, node)\n```"))

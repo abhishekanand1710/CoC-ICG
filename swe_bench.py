@@ -4,27 +4,26 @@ from datasets import load_dataset
 import git
 import json
 from tqdm import tqdm
-
+import argparse
 from pathlib import Path
+from utils.repo_utils import *
 
-DATASET_DIR = Path('./swe_bench_verified_cache')
-DATASET_SAVE_FILE = Path(DATASET_DIR, 'dataset.json')
-REPOS_DIR = Path(DATASET_DIR, 'repos')
-
-def save_dataset(dataset):
-    with open(DATASET_SAVE_FILE.resolve(), 'w') as f:
-        json.dump(dataset, f)
-
-def load_swe_bench_dataset(dataset: str = 'princeton-nlp/SWE-bench_Verified'):
-    if DATASET_SAVE_FILE.exists():
-        with open(DATASET_SAVE_FILE.resolve(), 'r') as f:
+def load_swe_bench_dataset(dataset_split, dataset_save_path):
+    '''
+    Load dataset either from local storage path or from huggingface and persist it to local storage
+    '''
+    if dataset_save_path.exists():
+        print(f"Dataset instances already saved at {dataset_save_path}.")
+        with open(dataset_save_path.resolve(), 'r') as f:
             return json.load(f)
         
+    dataset = 'princeton-nlp/SWE-bench_Lite'
+    if dataset_split == 'verified':
+        dataset = 'princeton-nlp/SWE-bench_Verified'
     data = load_dataset(dataset)['test']
-    # data = load_dataset(dataset)['dev']
     
     instances = {}
-    for instance in tqdm(data):
+    for instance in data:
         instance = {
             'repo': instance['repo'],
             'instance_id': instance['instance_id'],
@@ -41,47 +40,37 @@ def load_swe_bench_dataset(dataset: str = 'princeton-nlp/SWE-bench_Verified'):
             'PASS_TO_PASS': json.loads(instance['PASS_TO_PASS'])
         }
         instances[instance['instance_id']] = instance
-    
-    save_dataset(instances)
+
+    with open(dataset_save_path.resolve(), 'w') as f:
+        json.dump(instances, f)
+    print(f"Fetched instances and saved to {dataset_save_path}.")
     
     return instances
 
-def checkout_git_repo_at_commit(repo_name, commit):
-    repo_dir = f"{repo_name}.git"
+def main(args):
+    '''
+    Load a dataset split and clone its repos to local storage
+    '''
+    dataset_split = args.split
+    dataset_dir = args.dataset_dir
+    dataset_save_path = Path(dataset_dir, 'dataset.json')
+    repos_dir = Path(dataset_dir, 'repos')
 
-    instance_repo = Path(REPOS_DIR, repo_name)
+    os.makedirs(dataset_dir, exist_ok=True)
+    os.makedirs(repos_dir, exist_ok=True)
+    dataset_instances = load_swe_bench_dataset(dataset_split, dataset_save_path)
 
-    if not instance_repo.exists():
-        repo = git.Repo.clone_from(f"https://github.com/{repo_name}.git", instance_repo.resolve())
-    else:
-        repo = git.Repo(instance_repo.resolve())
-
-    repo.git.checkout(commit)
-    repo.close()
-    
-    return repo_dir
-
-def prepare_one_instance(instance):
-    instance_id = instance["instance_id"]
-    base_commit = instance["base_commit"]
-    repo_id = instance["repo"]
-    problem_statement = instance["problem_statement"]
-    
-    patch = instance["patch"]
-
-    REPOS_DIR.mkdir(exist_ok=True)
-
-    repo_dir = checkout_git_repo_at_commit(repo_id, base_commit)
-    
-
-def process_instances(instances):
-    for instance_id, instance in tqdm(instances.items()):
-        prepare_one_instance(instance)
-
-def main():
-    os.makedirs('./swe_bench_verified_cache', exist_ok=True)
-    dataset = load_swe_bench_dataset()
-    process_instances(dataset)
+    print(f"Cloning repos..")
+    for _, instance in tqdm(dataset_instances.items()):
+        base_commit = instance["base_commit"]
+        repo_id = instance["repo"]
+        checkout_git_repo_at_commit(repos_dir, repo_id, base_commit)
+    print(f"Dataset saved to path: {dataset_dir}")
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description="Prefetch dataset repositories")
+    parser.add_argument("-d", "--dataset_dir", type=str, help="Directory containing SWE-Bench task repos", default="./swe_bench_verified_cache")
+    parser.add_argument("-s", "--split", type=str, help="Dataset split to load - lite/verified", required=True)
+
+    args = parser.parse_args()
+    main(args)

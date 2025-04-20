@@ -1,7 +1,0 @@
-coc_verified_2 = 139.80
-coc_verified_3 = 79.69
-self_plan_1 = 82.69
-self_plan_2 = 48.46
-coc_lite_2 = 43.78
-self_plan_lite_1 = 26.91 
-self_plan_lite_2 = 48.44

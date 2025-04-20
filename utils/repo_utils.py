@@ -3,31 +3,18 @@ from pathlib import Path
 import os
 import subprocess
 import tempfile
-
 from langchain_community.document_loaders.generic import GenericLoader
 from langchain_community.document_loaders.parsers import LanguageParser
 from langchain_text_splitters import Language
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-
-def get_file_content(file_path: str) -> str:
-    if not os.path.exists(file_path):
-        return f"File '{file_path}' does not exist"
-    
-    if os.path.isdir(file_path):
-        return f"'{file_path}' is a directory, not a file"
-    
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            content = f.read()
-        return content
-    except UnicodeDecodeError:
-        return f"File '{file_path}' is not a text file or contains non-UTF-8 characters"
+from langchain_openai import OpenAIEmbeddings
 
 def checkout_git_repo_at_commit(base_dir, repo_name, commit):
+    '''
+    Checks out git repo at the specified base commit of the instance in the dataset
+    '''
     instance_repo = Path(base_dir, repo_name)
-
     if not instance_repo.exists():
         repo = git.Repo.clone_from(f"https://github.com/{repo_name}.git", instance_repo.resolve())
     else:
@@ -40,6 +27,9 @@ def checkout_git_repo_at_commit(base_dir, repo_name, commit):
     return instance_repo
 
 def find_non_utf_encoded_files_in_dir(dir):
+    '''
+    Returns a list of files that are not utf-8 encoded in a repository
+    '''
     invalid_files = []
     for root, _, files in os.walk(dir):
         for file in files:
@@ -51,8 +41,12 @@ def find_non_utf_encoded_files_in_dir(dir):
                 invalid_files.append(file_path)
     return invalid_files
 
-def init_vectorstore(instance_id, splits):
-    embeddings_path = f"swe_bench_cache/repo_embeddings/{instance_id}"
+def init_vectorstore(instance_id, splits, embeddings_dir):
+    '''
+    Initialized a vectorstore for repo code embeddings from local storage if embeddings are already generated
+    or from code files.
+    '''
+    embeddings_path = f"{embeddings_dir}/{instance_id}"
     if os.path.exists(embeddings_path):
         vectorstore = FAISS.load_local(embeddings_path, 
                                        OpenAIEmbeddings(model="text-embedding-3-small"), 
@@ -62,9 +56,13 @@ def init_vectorstore(instance_id, splits):
         vectorstore = FAISS.from_documents(splits, embeddings)
         vectorstore.save_local(embeddings_path)
 
-    return vectorstore
+    return vectorstore.as_retriever(search_kwargs={"k": 20})
 
-def process_repo(instance, base_dir: str):
+def process_repo(instance, base_dir, embeddings_dir):
+    '''
+    Prepares the instance repository for inference by checking it out at the base commit
+    and initialize a retriever from an embeddings vectorstore
+    '''
     repo_dir = checkout_git_repo_at_commit(base_dir, repo_name=instance['repo'], commit=instance['base_commit'])
 
     non_utf_files = find_non_utf_encoded_files_in_dir(repo_dir)
@@ -81,14 +79,20 @@ def process_repo(instance, base_dir: str):
         language=Language.PYTHON, chunk_size=1000, chunk_overlap=0
     )
     splits = text_splitter.split_documents(documents)
-    vectorstore = init_vectorstore(instance['instance_id'], splits)
+    vectorstore = init_vectorstore(instance['instance_id'], splits, embeddings_dir)
     return vectorstore
 
 def process_repo_min(instance, base_dir: str):
+    '''
+    Prepares the instance repository for inference by checking it out at the base commit
+    '''
     repo_dir = checkout_git_repo_at_commit(base_dir, repo_name=instance['repo'], commit=instance['base_commit'])
     return repo_dir
 
 def apply_edits(file_path, edits):
+    '''
+    Takes in file path and a list of edits to apply and returns the new file content after applying the edits
+    '''
     with open(file_path, 'r') as f:
         content = f.read().split('\n')
     
@@ -107,6 +111,9 @@ def apply_edits(file_path, edits):
     return '\n'.join(content)
 
 def generate_patch_file(file_edits, codebase_path):
+    '''
+    Generates a git patch file by applying all file edits to the codebase
+    '''
     repo_path = os.path.abspath(codebase_path)
     orig_dir = os.getcwd()
 

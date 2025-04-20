@@ -93,8 +93,8 @@ def main(args):
     repos_dir= f"{args.dataset_dir}/repos"
     repo_embeddings_dir = f"{args.dataset_dir}/repo_embeddings"
 
-    if not os.path.exists(f"output/{run_id}"):
-        os.mkdir(f"output/{run_id}")
+    os.makedirs(f"output", exist_ok=True)
+    os.makedirs(f"output/{run_id}", exist_ok=True)
 
     output_file = f"output/{run_id}/prediction_self_plan_rag_{args.model}.json"
     processed_instances = load_processed_instances(output_file)

@@ -17,8 +17,8 @@ source set_envs.sh
 
 **Load datasets**
 ```bash
-python3 swe_bench.py --dataset_dir <director to save dataset> --split verified
-python3 swe_bench.py --dataset_dir <director to save dataset> --split lite
+python3 swe_bench.py --dataset_dir <path to directory to save dataset> --split verified
+python3 swe_bench.py --dataset_dir <path to directory to save dataset> --split lite
 ```
 
 **Run methods**
@@ -35,7 +35,7 @@ python3 agent_coc.py --dataset_dir <path to directory containing dataset> --run_
 
 **Calculate coverage**
 ```bash
-python3 coverage.py --pred <path to prediction file> --dataset_dir <path to directory containing dataset>
+python3 coverage.py --pred <path to prediction file> --dataset_dir <directory containing dataset>
 ```
 
 ## Main Results

@@ -1,29 +1,50 @@
 # Incorporating Chain-of-Context in Self-planning Enhances Interactive Code Generation from Natural Language
 
-## Baseline Results:
+## Original Idea
+The project is an implementation of the idea proposed for improved code generation in this doc - [Idea Doc](https://docs.google.com/document/d/1Plnxvgh7KfSnHrURyGp2fqXrZORDjQK-xc6rxZpnmU8/edit?tab=t.0)
 
-**1. Vanilla RAG:** Score = 0.33%
-```json
-{
-    "total_instances": 300,
-    "submitted_instances": 300,
-    "completed_instances": 77,
-    "resolved_instances": 1,
-    "unresolved_instances": 76,
-    "empty_patch_instances": 1,
-    "error_instances": 222
-}
+## Usage
+
+**Set API Keys**
+Update `<open_ai_api_key>` and `<lang_smith_api_key>` in set_envs.sh
+
+**Initialize environment**
+```bash
+poetry install
+eval $(poetry env activate)
+source set_envs.sh
 ```
 
-**2. Self-Planning RAG:** Score = 1.33%
-```json
-{
-    "total_instances": 300,
-    "submitted_instances": 300,
-    "completed_instances": 42,
-    "resolved_instances": 4,
-    "unresolved_instances": 38,
-    "empty_patch_instances": 2,
-    "error_instances": 256
-}
+**Load datasets**
+```bash
+python3 swe_bench.py --dataset_dir <path to directory to save dataset> --split verified
+python3 swe_bench.py --dataset_dir <path to directory to save dataset> --split lite
 ```
+
+**Run methods**
+```bash
+# Self-Planning with RAG
+python3 agent_self_planning_rag.py --dataset_dir <path to directory containing dataset> --run_id <unique_run_id>
+
+# Self-Planning with ICR
+python3 agent_self_planning_icr.py --dataset_dir <path to directory containing dataset> --run_id <unique_run_id>
+
+# Chain-Of-Context
+python3 agent_coc.py --dataset_dir <path to directory containing dataset> --run_id <unique_run_id>
+```
+
+**Calculate coverage**
+```bash
+python3 coverage.py --pred <path to prediction file> --dataset_dir <directory containing dataset>
+```
+
+## Main Results
+
+### SWE-Bench Verified
+<img src="assets/swe_bench_verified_results.png"/>
+
+### SWE-Bench Lite
+<img src="assets/swe_bench_verified_results.png"/>
+
+## Full Report
+Read the [full report](https://www.overleaf.com/project/67cf2e8c2cea0064ada12be5)

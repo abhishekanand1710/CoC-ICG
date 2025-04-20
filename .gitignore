@@ -1,7 +1,3 @@
-swe_bench_cache
-arcade-nl2code
-kaggle.json
-SWE-bench
 **/__pycache__
-scrap.py
 .DS_Store
+.vscode
